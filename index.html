@@ -14,7 +14,6 @@
 <body>
 <div class="app">
 
-  <!-- HEADER -->
   <header class="hdr">
     <div class="brand">
       <div class="brand-icon">⛽</div>
@@ -29,51 +28,34 @@
     </div>
   </header>
 
-  <!-- BOTTOM NAV -->
   <nav class="nav">
     <button class="nb active" data-page="home">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-        <polyline points="9 22 9 12 15 12 15 22"/>
-      </svg>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
       <span>Bosh</span>
     </button>
     <button class="nb" data-page="cars">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M5 17H3a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2v3"/>
-        <rect x="9" y="11" width="14" height="10" rx="2"/>
-        <circle cx="12" cy="21" r="1"/>
-        <circle cx="20" cy="21" r="1"/>
-      </svg>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 17H3a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2v3"/><rect x="9" y="11" width="14" height="10" rx="2"/><circle cx="12" cy="21" r="1"/><circle cx="20" cy="21" r="1"/></svg>
       <span>Mashinalar</span>
     </button>
     <button class="nb" data-page="add-car">
       <div class="nc-btn">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-        </svg>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
       </div>
       <span>Qo'shish</span>
     </button>
     <button class="nb" data-page="oils">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M3 22l3-3"/><path d="M6 19c5-5 6-14 6-14s-2 8 2 12"/>
-        <path d="M18 22l-3-3"/><path d="M15 19c-5-5-6-14-6-14s2 8-2 12"/>
-        <circle cx="12" cy="5" r="1"/>
-      </svg>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 22l3-3"/><path d="M6 19c5-5 6-14 6-14s-2 8 2 12"/><path d="M18 22l-3-3"/><path d="M15 19c-5-5-6-14-6-14s2 8-2 12"/><circle cx="12" cy="5" r="1"/></svg>
       <span>Moylar</span>
     </button>
     <button class="nb" data-page="sms">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-      </svg>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
       <span>SMS</span>
     </button>
   </nav>
 
   <main class="main">
 
-    <!-- ===== HOME ===== -->
+    <!-- HOME -->
     <section id="home" class="page active">
       <div class="scroll">
         <div class="hero">
@@ -95,27 +77,25 @@
       </div>
     </section>
 
-    <!-- ===== CARS ===== -->
+    <!-- CARS -->
     <section id="cars" class="page">
       <div class="scroll">
         <div class="sw">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-          </svg>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           <input type="text" id="car-search" placeholder="Nomi yoki raqami..." class="si" oninput="filterGrid()">
         </div>
         <div id="cars-grid" class="cg"></div>
       </div>
     </section>
 
-    <!-- ===== ADD CAR ===== -->
+    <!-- ADD CAR -->
     <section id="add-car" class="page">
       <div class="scroll">
         <div class="fw">
           <h2 class="ptitle">Yangi Mashina</h2>
           <form id="add-car-form">
 
-            <!-- Mashina -->
+            <!-- Asosiy -->
             <div class="fc">
               <div class="fct">🚗 Mashina ma'lumotlari</div>
               <div class="fg"><label>Mashina Nomi</label><input type="text" id="car-name" placeholder="Toyota Camry 2020" required></div>
@@ -125,56 +105,43 @@
               <div class="fg"><label>Telefon Raqami</label><input type="tel" id="phone-number" placeholder="+998901234567" required></div>
             </div>
 
-            <!-- Dvigatel moyi -->
+            <!-- Dvigatel moyi: faqat tur, so'nggi KM yo'q -->
             <div class="fc">
               <div class="fct">🛢️ Dvigatel Moyi</div>
-              <div class="fg"><label>Moy Turi</label><select id="oil-name" required><option value="">Tanlang...</option></select></div>
               <div class="fg">
-                <label>So'nggi almashtirish (KM)</label>
-                <input type="number" id="oil-change-km" placeholder="45000" min="0">
-                <div class="shint-wrap" id="oil-hint"></div>
+                <label>Moy Turi</label>
+                <select id="oil-name" required><option value="">Tanlang...</option></select>
               </div>
+              <div id="oil-hint" class="shint-wrap"></div>
             </div>
 
-            <!-- Antifriz — PILL BUTTONS -->
+            <!-- Antifriz: FAQAT belgi tugmalari, KM va interval YO'Q -->
             <div class="fc">
               <div class="fct">🔵 Antifriz holati</div>
               <div class="fg">
                 <label>Joriy holat — tanlang</label>
-                <!-- Pill tugmalar: bosganda avtomatik intervallarni to'ldiradi -->
                 <div class="pill-group">
-                  <button type="button" class="pill-btn green" onclick="setAntifrizStatus('green')">🟢 Yaxshi</button>
-                  <button type="button" class="pill-btn yellow" onclick="setAntifrizStatus('yellow')">🟡 Tez orada</button>
-                  <button type="button" class="pill-btn red" onclick="setAntifrizStatus('red')">🔴 Hoziroq</button>
+                  <button type="button" class="pill-btn green" data-af="green">🟢 Yaxshi</button>
+                  <button type="button" class="pill-btn yellow" data-af="yellow">🟡 Tez orada</button>
+                  <button type="button" class="pill-btn red" data-af="red">🔴 Hoziroq</button>
                 </div>
-                <div class="shint-wrap" id="antifreeze-status-hint"></div>
-              </div>
-              <div class="fg"><label>Almashtirish intervali (KM)</label><input type="number" id="antifreeze-interval" placeholder="30000" value="30000" min="5000"></div>
-              <div class="fg">
-                <label>So'nggi antifriz almashtirish (KM)</label>
-                <input type="number" id="antifreeze-km" placeholder="40000" min="0">
-                <div class="shint-wrap" id="antifreeze-hint"></div>
+                <div id="antifreeze-status-hint" class="shint-wrap"></div>
               </div>
             </div>
 
-            <!-- Karobka moyi -->
+            <!-- Karobka: pill + interval (interval foydalanuvchi uchun foydali) -->
             <div class="fc">
               <div class="fct">🟢 Karobka Moyi</div>
               <div class="fg">
                 <label>Joriy holat — tanlang</label>
                 <div class="pill-group">
-                  <button type="button" class="pill-btn green" onclick="setGearboxStatus('green')">🟢 Yaxshi</button>
-                  <button type="button" class="pill-btn yellow" onclick="setGearboxStatus('yellow')">🟡 Tez orada</button>
-                  <button type="button" class="pill-btn red" onclick="setGearboxStatus('red')">🔴 Hoziroq</button>
+                  <button type="button" class="pill-btn green" data-gb="green">🟢 Yaxshi</button>
+                  <button type="button" class="pill-btn yellow" data-gb="yellow">🟡 Tez orada</button>
+                  <button type="button" class="pill-btn red" data-gb="red">🔴 Hoziroq</button>
                 </div>
-                <div class="shint-wrap" id="gearbox-status-hint"></div>
+                <div id="gearbox-status-hint" class="shint-wrap"></div>
               </div>
               <div class="fg"><label>Almashtirish intervali (KM)</label><input type="number" id="gearbox-interval" placeholder="50000" value="50000" min="10000"></div>
-              <div class="fg">
-                <label>So'nggi almashtirish (KM)</label>
-                <input type="number" id="gearbox-km" placeholder="30000" min="0">
-                <div class="shint-wrap" id="gearbox-hint"></div>
-              </div>
             </div>
 
             <button type="submit" class="bsub">✅ Mashinani Qo'shish</button>
@@ -183,7 +150,7 @@
       </div>
     </section>
 
-    <!-- ===== OILS ===== -->
+    <!-- OILS -->
     <section id="oils" class="page">
       <div class="scroll">
         <div class="fw">
@@ -201,28 +168,68 @@
       </div>
     </section>
 
-    <!-- ===== SMS ===== -->
+    <!-- SMS -->
     <section id="sms" class="page">
       <div class="scroll">
         <div class="fw">
           <h2 class="ptitle">SMS Sozlamalari</h2>
+
           <div class="scard" id="sms-status-card"><div id="sms-status" class="st">❌ SMS o'chirilgan</div></div>
+
+          <!-- ====== SMS ANALYTICS ====== -->
           <div class="fc">
-            <div class="sr"><span>📤 Yuborilgan SMS</span><strong id="sms-sent-count">0</strong></div>
-            <div class="sr"><span>📡 API holati</span><strong id="sms-api-status">—</strong></div>
-            <button class="bg" onclick="resetSmsCount()">🔄 Hisoblagichni tiklash</button>
+            <div class="fct">📊 SMS Hisoblagich & Analitika</div>
+
+            <div class="analytics-grid">
+              <div class="an-card">
+                <div class="an-icon">📤</div>
+                <div class="an-num" id="an-total">0</div>
+                <div class="an-lbl">Jami SMS</div>
+              </div>
+              <div class="an-card an-today-card">
+                <div class="an-icon">📅</div>
+                <div class="an-num" id="an-today">0</div>
+                <div class="an-lbl">Bugun</div>
+              </div>
+              <div class="an-card an-balance-card">
+                <div class="an-icon">💰</div>
+                <div class="an-num" id="an-balance">—</div>
+                <div class="an-lbl">Balans</div>
+              </div>
+              <div class="an-card">
+                <div class="an-icon">📡</div>
+                <div class="an-status" id="sms-api-status">—</div>
+                <div class="an-lbl">API</div>
+              </div>
+            </div>
+
+            <!-- Balans API -->
+            <div class="balance-row">
+              <input type="url" id="balance-api-url" placeholder="Balans API URL (ixtiyoriy)" class="balance-input">
+              <button class="balance-btn" onclick="checkBalance()">🔍 Tekshirish</button>
+            </div>
+
+            <!-- Bugungi jurnal -->
+            <div class="log-header">
+              <span class="log-title">📋 Bugungi SMS jurnali</span>
+              <button class="bg-sm" onclick="clearTodayLog()">🗑️ Tozalash</button>
+            </div>
+            <div id="sms-log-list" class="sms-log-list">
+              <div class="log-empty">Bugun hech qanday SMS yuborilmagan</div>
+            </div>
+
+            <div class="an-btns">
+              <button class="bg" onclick="resetSmsCount()">🔄 Hisoblagichni tiklash</button>
+              <button class="bg" onclick="exportSmsLog()">📤 Jurnalni eksport</button>
+            </div>
           </div>
 
-          <!-- O'zgaruvchilar ko'rsatmasi -->
+          <!-- O'zgaruvchilar -->
           <div class="fc">
             <div class="fct">Mavjud o'zgaruvchilar</div>
             <div class="sms-autovar">✨ Mashina rusumi va nomeri avtomatik qo'shiladi</div>
             <div class="svars">
-              <code>{car_name}</code>
-              <code>{car_number}</code>
-              <code>{km}</code>
-              <code>{date}</code>
-              <code>{remain_km}</code>
+              <code>{car_name}</code><code>{car_number}</code><code>{km}</code><code>{date}</code><code>{remain_km}</code>
             </div>
           </div>
 
@@ -237,29 +244,21 @@
             </div>
             <div class="fc">
               <div class="fct">Xabar Shablonlari</div>
-              <p style="font-size:12px;color:var(--text2);margin-bottom:12px">Shablonlar avtomatik ravishda mashina rusumi <strong>{car_name}</strong> va nomeri <strong>{car_number}</strong> bilan yuboriladi</p>
-              <div class="fg">
-                <label>🛢️ Dvigatel Moyi</label>
-                <textarea id="sms-oil-message" rows="3" placeholder="{car_name} ({car_number}) — dvigatel moyi almashtirish vaqti keldi! Probeg: {km} km. Sana: {date}"></textarea>
-              </div>
-              <div class="fg">
-                <label>🔵 Antifriz</label>
-                <textarea id="sms-antifreeze-message" rows="3" placeholder="{car_name} ({car_number}) — antifriz almashtirish vaqti keldi! Probeg: {km} km. Sana: {date}"></textarea>
-              </div>
-              <div class="fg">
-                <label>🟢 Karobka Moyi</label>
-                <textarea id="sms-gearbox-message" rows="3" placeholder="{car_name} ({car_number}) — karobka moyi almashtirish vaqti keldi! Probeg: {km} km. Sana: {date}"></textarea>
-              </div>
+              <p style="font-size:12px;color:var(--text2);margin-bottom:12px">Shablonlar <strong>{car_name}</strong> va <strong>{car_number}</strong> bilan to'ldiriladi</p>
+              <div class="fg"><label>🛢️ Dvigatel Moyi</label><textarea id="sms-oil-message" rows="3" placeholder="{car_name} ({car_number}) — dvigatel moyi almashtirish vaqti keldi! Probeg: {km} km. Sana: {date}"></textarea></div>
+              <div class="fg"><label>🔵 Antifriz</label><textarea id="sms-antifreeze-message" rows="3" placeholder="{car_name} ({car_number}) — antifriz almashtirish vaqti keldi! Probeg: {km} km. Sana: {date}"></textarea></div>
+              <div class="fg"><label>🟢 Karobka Moyi</label><textarea id="sms-gearbox-message" rows="3" placeholder="{car_name} ({car_number}) — karobka moyi almashtirish vaqti keldi! Probeg: {km} km. Sana: {date}"></textarea></div>
             </div>
             <button type="submit" class="bsub">💾 Saqlash</button>
           </form>
+
         </div>
       </div>
     </section>
 
   </main>
 
-  <!-- ===== SETTINGS PANEL ===== -->
+  <!-- SETTINGS PANEL -->
   <div id="settings-panel" class="sp">
     <div class="sov" id="settings-overlay"></div>
     <div class="sd">
@@ -271,10 +270,7 @@
       <div class="sscroll">
         <div class="sg">
           <div class="sgt">Ko'rinish</div>
-          <div class="srow">
-            <span id="theme-label">🌙 Tungi rejim</span>
-            <label class="tg"><input type="checkbox" id="dark-mode-toggle" onchange="toggleTheme(this.checked)"><span class="ts"></span></label>
-          </div>
+          <div class="srow"><span id="theme-label">🌙 Tungi rejim</span><label class="tg"><input type="checkbox" id="dark-mode-toggle" onchange="toggleTheme(this.checked)"><span class="ts"></span></label></div>
         </div>
         <div class="sg">
           <div class="sgt">Ogohlantirish chegaralari</div>
@@ -294,12 +290,12 @@
           <div class="srow click" onclick="exportData()"><span>📤 Eksport (JSON)</span><span>›</span></div>
           <div class="srow click dr" onclick="confirmClear()"><span>🗑️ Barcha ma'lumotlarni o'chirish</span><span>›</span></div>
         </div>
-        <div class="ver">MoyTrack v3.1 Pro · LocalDB 💾</div>
+        <div class="ver">MoyTrack v3.2 Pro · LocalDB 💾</div>
       </div>
     </div>
   </div>
 
-  <!-- ===== CAR MODAL ===== -->
+  <!-- CAR MODAL -->
   <div id="car-modal" class="modal">
     <div class="mo"></div>
     <div class="mc">
@@ -317,8 +313,7 @@
         <button class="btn bp mb8" id="btn-update-km">📍 Probeg Yangilash</button>
         <hr class="divider">
         <div class="fct" style="margin-bottom:12px">⚙️ Xizmat Almashtirish</div>
-        <div class="fg">
-          <label>Xizmat Turi</label>
+        <div class="fg"><label>Xizmat Turi</label>
           <select id="modal-svc-type">
             <option value="oil">🛢️ Dvigatel Moyi</option>
             <option value="antifreeze">🔵 Antifriz</option>
@@ -335,7 +330,6 @@
 
   <div id="toast" class="toast"></div>
 </div>
-
 <script src="app.js"></script>
 </body>
 </html>

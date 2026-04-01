@@ -1,6 +1,6 @@
 // ============================================================
-// MOYTRACK PRO v3.1 — app.js
-// LocalStorage DB · Pill tugmalar · Avtomatik SMS shablonlar
+// MOYTRACK PRO v3.2 — app.js
+// LocalStorage · Pill belgisi · SMS Analytics & Jurnal
 // ============================================================
 
 // ========== DATABASE ==========
@@ -35,16 +35,22 @@ let smsConfig = DB.get('sms', {
   enabled: false,
   sms_sent_count: 0
 });
-let cfg     = DB.get('cfg', { warn_pct: 80, danger_pct: 100, theme: 'dark' });
-let WPCT    = cfg.warn_pct   / 100;
-let DPCT    = cfg.danger_pct / 100;
-let curCar  = null;
+let smsLog    = DB.get('sms_log', []);   // [{id, car_name, car_number, type, km, date, time, status}]
+let cfg       = DB.get('cfg', { warn_pct: 80, danger_pct: 100, theme: 'dark', balance_url: '' });
+let WPCT      = cfg.warn_pct   / 100;
+let DPCT      = cfg.danger_pct / 100;
+let curCar    = null;
+
+// Antifriz status tanlash holati (pill tugma uchun)
+let afStatus  = 'green';   // default
+let gbStatus  = 'green';   // default
 
 // ========== SAVE HELPERS ==========
-const saveCars  = () => DB.set('cars', allCars);
-const saveOils  = () => DB.set('oils', allOils);
-const saveSms   = () => DB.set('sms',  smsConfig);
-const saveCfg   = () => DB.set('cfg',  cfg);
+const saveCars   = () => DB.set('cars',    allCars);
+const saveOils   = () => DB.set('oils',    allOils);
+const saveSms    = () => DB.set('sms',     smsConfig);
+const saveCfg    = () => DB.set('cfg',     cfg);
+const saveSmsLog = () => DB.set('sms_log', smsLog);
 
 // ========== THEME ==========
 function applyTheme() {
@@ -68,8 +74,8 @@ function oilInt(name) {
 }
 function carSt(car) {
   const oU = (car.total_km - car.oil_change_km)  / oilInt(car.oil_name);
-  const aU = (car.total_km - car.antifreeze_km)  / car.antifreeze_interval;
-  const gU = (car.total_km - car.gearbox_km)     / car.gearbox_interval;
+  const aU = (car.total_km - car.antifreeze_km)  / (car.antifreeze_interval || 30000);
+  const gU = (car.total_km - car.gearbox_km)     / (car.gearbox_interval   || 50000);
   const m  = Math.max(oU, aU, gU);
   if (m >= DPCT) return { cls: 'su', dot: 'ug' };
   if (m >= WPCT) return { cls: 'sw', dot: 'wn' };
@@ -77,9 +83,9 @@ function carSt(car) {
 }
 function svcE(u) { return u >= DPCT ? '🔴' : u >= WPCT ? '🟡' : '🟢'; }
 function badgeOf(u) {
-  if (u >= DPCT) return { t: '🔴 HOZIR!', c: 'bdn', b: 'd' };
-  if (u >= WPCT) return { t: '🟡 Tez!',   c: 'bwn', b: 'w' };
-  return { t: '🟢 Yaxshi', c: 'bok', b: '' };
+  if (u >= DPCT) return { t: '🔴 HOZIR!',    c: 'bdn', b: 'd' };
+  if (u >= WPCT) return { t: '🟡 Tez!',       c: 'bwn', b: 'w' };
+  return           { t: '🟢 Yaxshi',           c: 'bok', b: '' };
 }
 
 // ========== NAVIGATION ==========
@@ -89,7 +95,7 @@ function navigateTo(page) {
   document.querySelectorAll('.nb').forEach(b => b.classList.toggle('active', b.dataset.page === page));
   if      (page === 'home')    loadDashboard();
   else if (page === 'cars')    { loadCarsGrid(); document.getElementById('car-search').value = ''; }
-  else if (page === 'add-car') { resetAddCarForm(); }
+  else if (page === 'add-car') resetAddCarForm();
   else if (page === 'oils')    loadOilsPage();
   else if (page === 'sms')     loadSmsPage();
 }
@@ -109,7 +115,7 @@ function loadDashboard() {
   document.getElementById('warning-stat').textContent = w;
   document.getElementById('good-stat').textContent    = g;
 
-  const uel = document.getElementById('urgent-list');
+  const uel   = document.getElementById('urgent-list');
   const notif = [...uc, ...wc];
   uel.innerHTML = notif.length
     ? notif.map(ciHTML).join('')
@@ -127,8 +133,8 @@ function ciHTML(car) {
   const s  = carSt(car);
   const oi = oilInt(car.oil_name);
   const oU = (car.total_km - car.oil_change_km) / oi;
-  const aU = (car.total_km - car.antifreeze_km) / car.antifreeze_interval;
-  const gU = (car.total_km - car.gearbox_km)    / car.gearbox_interval;
+  const aU = (car.total_km - car.antifreeze_km) / (car.antifreeze_interval || 30000);
+  const gU = (car.total_km - car.gearbox_km)    / (car.gearbox_interval   || 50000);
   return `<div class="ci ${s.cls}" data-id="${car.id}">
     <div class="cav">🚗</div>
     <div class="cinfo">
@@ -138,7 +144,6 @@ function ciHTML(car) {
     </div>
   </div>`;
 }
-
 function addCIE(el) {
   el.querySelectorAll('.ci').forEach(e => {
     e.addEventListener('click', () => { curCar = allCars.find(c => c.id == e.dataset.id); openModal(); });
@@ -161,8 +166,8 @@ function loadCarsGrid(q = '') {
     const s  = carSt(car);
     const oi = oilInt(car.oil_name);
     const oU = (car.total_km - car.oil_change_km) / oi;
-    const aU = (car.total_km - car.antifreeze_km) / car.antifreeze_interval;
-    const gU = (car.total_km - car.gearbox_km)    / car.gearbox_interval;
+    const aU = (car.total_km - car.antifreeze_km) / (car.antifreeze_interval || 30000);
+    const gU = (car.total_km - car.gearbox_km)    / (car.gearbox_interval   || 50000);
     return `<div class="cc" data-id="${car.id}">
       <div class="cc-top">🚗<div class="cdot ${s.dot}"></div></div>
       <div class="cc-body">
@@ -188,130 +193,63 @@ function renderOilSel(id, val) {
     allOils.map(o => `<option value="${o.name}"${o.name === cur ? ' selected' : ''}>${o.name} (${o.interval.toLocaleString()} km)</option>`).join('');
 }
 
-// ========== STATUS HINT CHIPS ==========
-function showChip(elId, cls, icon, text, used, total) {
-  const el = document.getElementById(elId);
-  if (!el) return;
-  el.innerHTML = `<span class="status-chip ${cls}">${icon} ${text} · ${used.toLocaleString()} / ${total.toLocaleString()} km</span>`;
-}
-function clearChip(elId) { const e = document.getElementById(elId); if (e) e.innerHTML = ''; }
-
-function calcAndShowChip(hintId, totalKm, lastKm, interval) {
-  if (!totalKm || !lastKm || !interval) { clearChip(hintId); return; }
-  const usage = (totalKm - lastKm) / interval;
-  const used  = Math.max(0, totalKm - lastKm);
-  if      (usage >= DPCT) showChip(hintId, 'red',    '🔴', 'HOZIROQ almashtirish kerak!', used, interval);
-  else if (usage >= WPCT) showChip(hintId, 'yellow', '🟡', 'Tez orada almashtirish kerak', used, interval);
-  else                     showChip(hintId, 'green',  '🟢', 'Holat yaxshi', used, interval);
-}
-
-// Hint listeners
-['current-km', 'oil-change-km', 'oil-name'].forEach(id => {
-  document.getElementById(id)?.addEventListener('input', updateOilHint);
-  document.getElementById(id)?.addEventListener('change', updateOilHint);
-});
-['current-km', 'antifreeze-km', 'antifreeze-interval'].forEach(id => {
-  document.getElementById(id)?.addEventListener('input', updateAntifrizHint);
-});
-['current-km', 'gearbox-km', 'gearbox-interval'].forEach(id => {
-  document.getElementById(id)?.addEventListener('input', updateGearboxHint);
-});
-
-function updateOilHint() {
-  const km  = parseFloat(document.getElementById('current-km')?.value)   || 0;
-  const okm = parseFloat(document.getElementById('oil-change-km')?.value) || 0;
-  const sel = document.getElementById('oil-name')?.value;
-  const int = sel ? oilInt(sel) : 10000;
-  calcAndShowChip('oil-hint', km, okm, int);
-}
-function updateAntifrizHint() {
-  const km  = parseFloat(document.getElementById('current-km')?.value)       || 0;
-  const akm = parseFloat(document.getElementById('antifreeze-km')?.value)     || 0;
-  const ait = parseFloat(document.getElementById('antifreeze-interval')?.value) || 30000;
-  calcAndShowChip('antifreeze-hint', km, akm, ait);
-}
-function updateGearboxHint() {
-  const km  = parseFloat(document.getElementById('current-km')?.value)       || 0;
-  const gkm = parseFloat(document.getElementById('gearbox-km')?.value)       || 0;
-  const git = parseFloat(document.getElementById('gearbox-interval')?.value)  || 50000;
-  calcAndShowChip('gearbox-hint', km, gkm, git);
-}
-
-// ========== PILL BUTTON HANDLERS ==========
-// Antifriz pill tugma bosilganda — so'nggi almashtirish KM ni avtomatik hisoblaydi
-function setAntifrizStatus(status) {
-  const totalKm = parseFloat(document.getElementById('current-km')?.value) || 0;
-  const interval = parseFloat(document.getElementById('antifreeze-interval')?.value) || 30000;
-  const hintEl  = document.getElementById('antifreeze-status-hint');
-
-  // Active pill ko'rsatish
-  document.querySelectorAll('.fc').forEach(fc => {
-    if (fc.querySelector('#antifreeze-interval')) {
-      fc.querySelectorAll('.pill-btn').forEach(b => b.style.opacity = '0.5');
-      const clickedPill = fc.querySelector(`.pill-btn.${status}`);
-      if (clickedPill) clickedPill.style.opacity = '1';
-    }
+// ========== PILL BUTTONS — ADD CAR ==========
+// Antifriz pill bosish
+document.querySelectorAll('[data-af]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    afStatus = btn.dataset.af;
+    document.querySelectorAll('[data-af]').forEach(b => b.classList.toggle('pill-active', b.dataset.af === afStatus));
+    const hints = { green: '🟢 Yaxshi holat saqlandi', yellow: '🟡 Tez orada almashtirish kerak', red: '🔴 Hoziroq almashtirish kerak!' };
+    const cls   = { green: 'green', yellow: 'yellow', red: 'red' };
+    document.getElementById('antifreeze-status-hint').innerHTML =
+      `<span class="status-chip ${cls[afStatus]}">${hints[afStatus]}</span>`;
   });
+});
 
-  let kmValue, chipCls, chipIcon, chipText;
-  if (status === 'green') {
-    // Holat yaxshi: so'nggi almashtirish = hozirgi km - interval * 0.2 (20% ishlatilgan)
-    kmValue  = Math.max(0, Math.round(totalKm - interval * 0.2));
-    chipCls  = 'green'; chipIcon = '🟢'; chipText = 'Yaxshi holat tanlandi';
-  } else if (status === 'yellow') {
-    // Tez orada: 80% ishlatilgan
-    kmValue  = Math.max(0, Math.round(totalKm - interval * 0.8));
-    chipCls  = 'yellow'; chipIcon = '🟡'; chipText = 'Tez orada almashtirish kerak';
-  } else {
-    // Hoziroq: 100%+ ishlatilgan
-    kmValue  = Math.max(0, Math.round(totalKm - interval * 1.05));
-    chipCls  = 'red'; chipIcon = '🔴'; chipText = 'Hoziroq almashtirish kerak!';
-  }
-
-  document.getElementById('antifreeze-km').value = kmValue;
-  if (hintEl) hintEl.innerHTML = `<span class="status-chip ${chipCls}">${chipIcon} ${chipText}</span>`;
-  updateAntifrizHint();
-}
-
-// Karobka pill tugma
-function setGearboxStatus(status) {
-  const totalKm  = parseFloat(document.getElementById('current-km')?.value) || 0;
-  const interval = parseFloat(document.getElementById('gearbox-interval')?.value) || 50000;
-  const hintEl   = document.getElementById('gearbox-status-hint');
-
-  document.querySelectorAll('.fc').forEach(fc => {
-    if (fc.querySelector('#gearbox-interval')) {
-      fc.querySelectorAll('.pill-btn').forEach(b => b.style.opacity = '0.5');
-      const clickedPill = fc.querySelector(`.pill-btn.${status}`);
-      if (clickedPill) clickedPill.style.opacity = '1';
-    }
+// Karobka pill bosish
+document.querySelectorAll('[data-gb]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    gbStatus = btn.dataset.gb;
+    document.querySelectorAll('[data-gb]').forEach(b => b.classList.toggle('pill-active', b.dataset.gb === gbStatus));
+    const hints = { green: '🟢 Yaxshi holat saqlandi', yellow: '🟡 Tez orada almashtirish kerak', red: '🔴 Hoziroq almashtirish kerak!' };
+    const cls   = { green: 'green', yellow: 'yellow', red: 'red' };
+    document.getElementById('gearbox-status-hint').innerHTML =
+      `<span class="status-chip ${cls[gbStatus]}">${hints[gbStatus]}</span>`;
   });
+});
 
-  let kmValue, chipCls, chipIcon, chipText;
-  if (status === 'green') {
-    kmValue = Math.max(0, Math.round(totalKm - interval * 0.2));
-    chipCls = 'green'; chipIcon = '🟢'; chipText = 'Yaxshi holat tanlandi';
-  } else if (status === 'yellow') {
-    kmValue = Math.max(0, Math.round(totalKm - interval * 0.8));
-    chipCls = 'yellow'; chipIcon = '🟡'; chipText = 'Tez orada almashtirish kerak';
+// Moy tanlanganda oil-hint ko'rsatadi (tur tanlandi xabari)
+document.getElementById('oil-name')?.addEventListener('change', () => {
+  const sel = document.getElementById('oil-name').value;
+  const hint = document.getElementById('oil-hint');
+  if (!hint) return;
+  if (sel) {
+    const interval = oilInt(sel);
+    hint.innerHTML = `<span class="status-chip green">✅ Tanlandi · ${interval.toLocaleString()} km har almashtiriladi</span>`;
   } else {
-    kmValue = Math.max(0, Math.round(totalKm - interval * 1.05));
-    chipCls = 'red'; chipIcon = '🔴'; chipText = 'Hoziroq almashtirish kerak!';
+    hint.innerHTML = '';
   }
+});
 
-  document.getElementById('gearbox-km').value = kmValue;
-  if (hintEl) hintEl.innerHTML = `<span class="status-chip ${chipCls}">${chipIcon} ${chipText}</span>`;
-  updateGearboxHint();
+// ========== PILL STATUS → KM HISOBLASH ==========
+// statusdan antifreeze_km hisoblaydi (hozirgi km va interval asosida)
+function pillToKm(status, totalKm, interval) {
+  if (status === 'green')  return Math.max(0, Math.round(totalKm - interval * 0.2));
+  if (status === 'yellow') return Math.max(0, Math.round(totalKm - interval * 0.8));
+  return Math.max(0, Math.round(totalKm - interval * 1.05));   // red
 }
 
-// ========== ADD CAR ==========
+// ========== ADD CAR FORM ==========
 function resetAddCarForm() {
   document.getElementById('add-car-form').reset();
   renderOilSel('oil-name');
-  ['oil-hint', 'antifreeze-hint', 'gearbox-hint',
-   'antifreeze-status-hint', 'gearbox-status-hint'].forEach(id => clearChip(id));
-  // Reset pill opacity
-  document.querySelectorAll('.pill-btn').forEach(b => b.style.opacity = '1');
+  ['oil-hint', 'antifreeze-status-hint', 'gearbox-status-hint'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = '';
+  });
+  afStatus = 'green'; gbStatus = 'green';
+  document.querySelectorAll('[data-af]').forEach(b => b.classList.remove('pill-active'));
+  document.querySelectorAll('[data-gb]').forEach(b => b.classList.remove('pill-active'));
 }
 
 document.getElementById('add-car-form').addEventListener('submit', e => {
@@ -323,19 +261,26 @@ document.getElementById('add-car-form').addEventListener('submit', e => {
 
   if (!name || !number || !oil) { showToast('❌ Barcha maydonlarni to\'ldiring', 'error'); return; }
 
+  const gearInterval = parseInt(document.getElementById('gearbox-interval').value) || 50000;
+  const afInterval   = 30000;   // Antifriz uchun standart interval (ko'rsatilmaydi, ichki)
+
+  // Pill statusidan km hisoblash
+  const antiKm  = pillToKm(afStatus, km, afInterval);
+  const gearKm  = pillToKm(gbStatus, km, gearInterval);
+
   const car = {
     id:                  DB.nextId('car'),
     car_name:            name,
     car_number:          number,
-    daily_km:            parseInt(document.getElementById('daily-km').value)              || 50,
+    daily_km:            parseInt(document.getElementById('daily-km').value) || 50,
     phone_number:        document.getElementById('phone-number').value.trim(),
     oil_name:            oil,
     total_km:            km,
-    oil_change_km:       parseInt(document.getElementById('oil-change-km').value)         || km,
-    antifreeze_km:       parseInt(document.getElementById('antifreeze-km').value)         || km,
-    gearbox_km:          parseInt(document.getElementById('gearbox-km').value)            || km,
-    antifreeze_interval: parseInt(document.getElementById('antifreeze-interval').value)   || 30000,
-    gearbox_interval:    parseInt(document.getElementById('gearbox-interval').value)      || 50000,
+    oil_change_km:       km,          // Hozirgi probegdan boshlanadi
+    antifreeze_km:       antiKm,      // Pill statusiga qarab
+    gearbox_km:          gearKm,      // Pill statusiga qarab
+    antifreeze_interval: afInterval,
+    gearbox_interval:    gearInterval,
     history:             [],
     added_at:            new Date().toISOString()
   };
@@ -358,7 +303,6 @@ function loadOilsPage() {
       </div>`).join('')
     : '<div class="empty"><div class="ei">🛢️</div><p>Hech qanday moy yo\'q</p></div>';
 }
-
 document.getElementById('add-oil-form').addEventListener('submit', e => {
   e.preventDefault();
   const name     = document.getElementById('oil-name-input').value.trim();
@@ -370,13 +314,104 @@ document.getElementById('add-oil-form').addEventListener('submit', e => {
   document.getElementById('add-oil-form').reset();
   loadOilsPage();
 });
-
 function deleteOil(id) {
   if (!confirm('Moy turini o\'chirasizmi?')) return;
   allOils = allOils.filter(o => o.id !== id);
   saveOils();
   showToast('✅ O\'chirildi!', 'success');
   loadOilsPage();
+}
+
+// ========== SMS ANALYTICS HELPERS ==========
+function todayStr() {
+  return new Date().toISOString().slice(0, 10);   // "2025-04-01"
+}
+
+function todayLogs() {
+  return smsLog.filter(l => l.date === todayStr());
+}
+
+function addSmsLog(car, type, km) {
+  const now = new Date();
+  smsLog.push({
+    id:         Date.now(),
+    car_name:   car.car_name,
+    car_number: car.car_number,
+    type,
+    km,
+    date:       now.toISOString().slice(0, 10),
+    time:       now.toLocaleTimeString('uz-UZ', { hour: '2-digit', minute: '2-digit' }),
+    status:     'yuborildi'
+  });
+  saveSmsLog();
+}
+
+function renderSmsLog() {
+  const el   = document.getElementById('sms-log-list');
+  if (!el) return;
+  const logs = [...todayLogs()].reverse();
+  if (!logs.length) {
+    el.innerHTML = '<div class="log-empty">Bugun hech qanday SMS yuborilmagan</div>';
+    return;
+  }
+  const icons = { oil: '🛢️', antifreeze: '🔵', gearbox: '🟢' };
+  const names = { oil: 'Dvigatel Moyi', antifreeze: 'Antifriz', gearbox: 'Karobka Moyi' };
+  el.innerHTML = logs.map(l => `
+    <div class="log-item">
+      <div class="log-icon">${icons[l.type] || '📨'}</div>
+      <div class="log-info">
+        <div class="log-car">${l.car_name} <span class="log-num">${l.car_number}</span></div>
+        <div class="log-type">${names[l.type] || l.type} · 🏁 ${l.km.toLocaleString()} km</div>
+      </div>
+      <div class="log-time">${l.time}</div>
+    </div>`).join('');
+}
+
+function updateAnalytics() {
+  const totalEl   = document.getElementById('an-total');
+  const todayEl   = document.getElementById('an-today');
+  if (totalEl) totalEl.textContent = (smsConfig.sms_sent_count || 0).toLocaleString();
+  if (todayEl)  todayEl.textContent = todayLogs().length;
+  renderSmsLog();
+}
+
+async function checkBalance() {
+  const url = document.getElementById('balance-api-url')?.value?.trim();
+  const el  = document.getElementById('an-balance');
+  if (!url) { showToast('⚠️ Balans API URL kiriting', 'error'); return; }
+  el.textContent = '...';
+  try {
+    const res  = await fetch(url);
+    const data = await res.json().catch(() => null);
+    // JSON javobdan balance/sum/amount field topib ko'rish
+    const bal = data?.balance ?? data?.sum ?? data?.amount ?? data?.data?.balance ?? '?';
+    el.textContent = bal;
+    cfg.balance_url = url;
+    saveCfg();
+    showToast('✅ Balans yangilandi', 'success');
+  } catch {
+    el.textContent = 'Xato';
+    showToast('❌ Balans yuklanmadi. URL to\'g\'riligini tekshiring.', 'error');
+  }
+}
+
+function clearTodayLog() {
+  if (!confirm('Bugungi SMS jurnalini tozalaysizmi?')) return;
+  const today = todayStr();
+  smsLog = smsLog.filter(l => l.date !== today);
+  saveSmsLog();
+  showToast('✅ Bugungi jurnal tozalandi', 'success');
+  renderSmsLog();
+  updateAnalytics();
+}
+
+function exportSmsLog() {
+  const data = JSON.stringify(smsLog, null, 2);
+  const a    = document.createElement('a');
+  a.href     = 'data:application/json,' + encodeURIComponent(data);
+  a.download = 'sms-jurnal.json';
+  a.click();
+  showToast('✅ Jurnal eksport qilindi', 'success');
 }
 
 // ========== SMS PAGE ==========
@@ -386,12 +421,19 @@ function loadSmsPage() {
   document.getElementById('sms-antifreeze-message').value  = smsConfig.antifreeze_message || '';
   document.getElementById('sms-gearbox-message').value     = smsConfig.gearbox_message    || '';
   document.getElementById('sms-enabled').checked           = !!smsConfig.enabled;
-  document.getElementById('sms-sent-count').textContent    = (smsConfig.sms_sent_count || 0).toLocaleString();
 
+  // Balans URL
+  const balUrl = document.getElementById('balance-api-url');
+  if (balUrl) balUrl.value = cfg.balance_url || '';
+
+  // API status
   const ae = document.getElementById('sms-api-status');
-  ae.textContent = smsConfig.api_url ? '✅ Kiritilgan' : '❌ Kiritilmagan';
-  ae.style.color = smsConfig.api_url ? 'var(--success)' : 'var(--danger)';
+  if (ae) {
+    ae.textContent = smsConfig.api_url ? '✅' : '❌';
+    ae.style.color = smsConfig.api_url ? 'var(--success)' : 'var(--danger)';
+  }
 
+  // Status card
   const card = document.getElementById('sms-status-card');
   const el   = document.getElementById('sms-status');
   if (smsConfig.enabled && smsConfig.api_url) {
@@ -401,6 +443,8 @@ function loadSmsPage() {
   } else {
     el.textContent = '❌ SMS o\'chirilgan'; card.classList.remove('on');
   }
+
+  updateAnalytics();
 }
 
 document.getElementById('sms-config-form').addEventListener('submit', e => {
@@ -420,26 +464,25 @@ function resetSmsCount() {
   smsConfig.sms_sent_count = 0;
   saveSms();
   showToast('✅ Hisoblagich tiklandi', 'success');
-  loadSmsPage();
+  updateAnalytics();
 }
 
-// ========== SMS TEMPLATE PROCESSOR ==========
-// Shablonga {car_name}, {car_number}, {km}, {date}, {remain_km} ni avtomatik qo'shadi
+// ========== SMS TEMPLATE ==========
 function processSmsTemplate(template, car, serviceType) {
-  const oi      = oilInt(car.oil_name);
-  const now     = new Date();
-  const date    = now.toLocaleDateString('uz-UZ', { year: 'numeric', month: '2-digit', day: '2-digit' });
+  const oi   = oilInt(car.oil_name);
+  const now  = new Date();
+  const date = now.toLocaleDateString('uz-UZ', { year: 'numeric', month: '2-digit', day: '2-digit' });
 
   let lastKm = car.oil_change_km, interval = oi;
-  if (serviceType === 'antifreeze') { lastKm = car.antifreeze_km; interval = car.antifreeze_interval; }
-  if (serviceType === 'gearbox')    { lastKm = car.gearbox_km;    interval = car.gearbox_interval; }
+  if (serviceType === 'antifreeze') { lastKm = car.antifreeze_km; interval = car.antifreeze_interval || 30000; }
+  if (serviceType === 'gearbox')    { lastKm = car.gearbox_km;    interval = car.gearbox_interval   || 50000; }
   const remain = Math.max(0, interval - (car.total_km - lastKm));
 
   return (template || '')
     .replace(/{car_name}/g,   car.car_name)
     .replace(/{car_number}/g, car.car_number)
     .replace(/{km}/g,         car.total_km.toLocaleString())
-    .replace(/{date}/g,        date)
+    .replace(/{date}/g,       date)
     .replace(/{remain_km}/g,  remain.toLocaleString());
 }
 
@@ -448,8 +491,8 @@ function openModal() {
   if (!curCar) return;
   const oi = oilInt(curCar.oil_name);
   const oU = (curCar.total_km - curCar.oil_change_km) / oi;
-  const aU = (curCar.total_km - curCar.antifreeze_km) / curCar.antifreeze_interval;
-  const gU = (curCar.total_km - curCar.gearbox_km)    / curCar.gearbox_interval;
+  const aU = (curCar.total_km - curCar.antifreeze_km) / (curCar.antifreeze_interval || 30000);
+  const gU = (curCar.total_km - curCar.gearbox_km)    / (curCar.gearbox_interval   || 50000);
 
   document.getElementById('modal-car-info').innerHTML = `
     <h3>${curCar.car_name}</h3>
@@ -469,8 +512,8 @@ function openModal() {
   document.getElementById('modal-services').innerHTML =
     svcBlock(oU, `🛢️ Dvigatel Moyi — <em style="font-weight:400;font-size:11px">${curCar.oil_name}</em>`,
       curCar.total_km - curCar.oil_change_km, oi) +
-    svcBlock(aU, '🔵 Antifriz', curCar.total_km - curCar.antifreeze_km, curCar.antifreeze_interval) +
-    svcBlock(gU, '🟢 Karobka Moyi', curCar.total_km - curCar.gearbox_km, curCar.gearbox_interval);
+    svcBlock(aU, '🔵 Antifriz', curCar.total_km - curCar.antifreeze_km, curCar.antifreeze_interval || 30000) +
+    svcBlock(gU, '🟢 Karobka Moyi', curCar.total_km - curCar.gearbox_km, curCar.gearbox_interval || 50000);
 
   document.getElementById('modal-km').value = curCar.total_km;
   renderOilSel('modal-oil-select', curCar.oil_name);
@@ -489,8 +532,8 @@ function openModal() {
 }
 
 function loadHistory() {
-  const hist  = curCar.history || [];
-  const el    = document.getElementById('modal-history');
+  const hist = curCar.history || [];
+  const el   = document.getElementById('modal-history');
   if (!hist.length) {
     el.innerHTML = '<div class="empty"><div class="ei">📭</div><p>Tarix mavjud emas</p></div>';
     return;
@@ -550,14 +593,21 @@ document.getElementById('btn-change-svc').addEventListener('click', () => {
   allCars = allCars.map(c => c.id === curCar.id ? curCar : c);
   saveCars();
 
-  // SMS yuborish (mock) — shablonni car ma'lumotlari bilan to'ldiradi
+  // SMS yuborish
   if (smsConfig.enabled && smsConfig.api_url) {
-    const templateMap = { oil: 'oil_message', antifreeze: 'antifreeze_message', gearbox: 'gearbox_message' };
-    const rawTemplate = smsConfig[templateMap[type]] || '';
-    const filledMsg   = processSmsTemplate(rawTemplate, curCar, type);
-    console.log('📤 SMS yuborilmoqda:', filledMsg);
+    const tplMap = { oil: 'oil_message', antifreeze: 'antifreeze_message', gearbox: 'gearbox_message' };
+    const msg    = processSmsTemplate(smsConfig[tplMap[type]] || '', curCar, type);
+
+    // Real HTTP so'rov
+    const url = new URL(smsConfig.api_url);
+    url.searchParams.set('phone',   curCar.phone_number);
+    url.searchParams.set('message', msg);
+    fetch(url.toString()).catch(() => {});
+
+    // Log va hisoblagich
     smsConfig.sms_sent_count = (smsConfig.sms_sent_count || 0) + 1;
     saveSms();
+    addSmsLog(curCar, type, km);
   }
 
   const labels = { oil: 'Dvigatel moyi almashtirildi', antifreeze: 'Antifriz yangilandi', gearbox: 'Karobka moyi almashtirildi' };
@@ -592,8 +642,8 @@ function saveThresholds() {
 
 function exportData() {
   const data = JSON.stringify({ cars: allCars, oils: allOils, sms: smsConfig, cfg }, null, 2);
-  const a = document.createElement('a');
-  a.href = 'data:application/json,' + encodeURIComponent(data);
+  const a    = document.createElement('a');
+  a.href     = 'data:application/json,' + encodeURIComponent(data);
   a.download = 'moytrack-backup.json';
   a.click();
   showToast('✅ Ma\'lumotlar eksport qilindi', 'success');
@@ -601,8 +651,8 @@ function exportData() {
 
 function confirmClear() {
   if (confirm('Barcha ma\'lumotlarni o\'chirasizmi? Bu amalni qaytarib bo\'lmaydi!')) {
-    ['cars', 'oils', '_id_car', '_id_oil'].forEach(k => localStorage.removeItem('mt_' + k));
-    allCars = []; allOils = [];
+    ['cars', 'oils', '_id_car', '_id_oil', 'sms_log'].forEach(k => localStorage.removeItem('mt_' + k));
+    allCars = []; allOils = []; smsLog = [];
     saveCars(); saveOils();
     showToast('✅ Tozalandi', 'success');
     loadDashboard(); closeSettings();
@@ -611,7 +661,7 @@ function confirmClear() {
 
 // ========== TOAST ==========
 function showToast(msg, type = 'success') {
-  const t = document.getElementById('toast');
+  const t    = document.getElementById('toast');
   t.textContent = msg;
   t.className   = 'toast show ' + type;
   setTimeout(() => t.classList.remove('show'), 3000);
@@ -622,7 +672,6 @@ function init() {
   applyTheme();
   document.getElementById('setting-warn').value   = cfg.warn_pct;
   document.getElementById('setting-danger').value = cfg.danger_pct;
-  // Default oillarni faqat birinchi marta saqlash
   if (!DB.get('oils_saved', false)) { saveOils(); DB.set('oils_saved', true); }
   loadDashboard();
   renderOilSel('oil-name');
