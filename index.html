@@ -168,7 +168,7 @@
                 </div>
                 <div class="shint-wrap" id="anti-pill-hint"></div>
               </div>
-              <div class="fg"><label>Almashtirish intervali (KM)</label><input type="number" id="antifreeze-interval" placeholder="30000" value="30000" min="5000"></div>
+              <input type="hidden" id="antifreeze-interval" value="30000">
               <div class="fg">
                 <label>So'nggi almashtirish (KM)</label>
                 <input type="number" id="antifreeze-km" placeholder="40000" min="0">
@@ -188,7 +188,7 @@
                 </div>
                 <div class="shint-wrap" id="gear-pill-hint"></div>
               </div>
-              <div class="fg"><label>Almashtirish intervali (KM)</label><input type="number" id="gearbox-interval" placeholder="50000" value="50000" min="10000"></div>
+              <input type="hidden" id="gearbox-interval" value="50000">
               <div class="fg">
                 <label>So'nggi almashtirish (KM)</label>
                 <input type="number" id="gearbox-km" placeholder="30000" min="0">
@@ -196,37 +196,13 @@
               </div>
             </div>
 
-            <!-- 6. Filtrlar -->
-            <div class="fc">
-              <div class="fct">🔩 Filtrlar</div>
-              <div class="fg">
-                <label>💨 Havo Filtr intervali (KM)</label>
-                <input type="number" id="air-filter-interval" placeholder="15000" value="15000" min="5000">
-              </div>
-              <div class="fg">
-                <label>💨 So'nggi almashtirish (KM)</label>
-                <input type="number" id="air-filter-km" placeholder="40000" min="0">
-                <div class="shint-wrap" id="air-filter-hint"></div>
-              </div>
-              <div class="fg">
-                <label>🌬️ Salon Filtr intervali (KM)</label>
-                <input type="number" id="cabin-filter-interval" placeholder="15000" value="15000" min="5000">
-              </div>
-              <div class="fg">
-                <label>🌬️ So'nggi almashtirish (KM)</label>
-                <input type="number" id="cabin-filter-km" placeholder="40000" min="0">
-                <div class="shint-wrap" id="cabin-filter-hint"></div>
-              </div>
-              <div class="fg">
-                <label>🔩 Moy Filtr intervali (KM)</label>
-                <input type="number" id="oil-filter-interval" placeholder="10000" value="10000" min="3000">
-              </div>
-              <div class="fg">
-                <label>🔩 So'nggi almashtirish (KM)</label>
-                <input type="number" id="oil-filter-km" placeholder="45000" min="0">
-                <div class="shint-wrap" id="oil-filter-hint"></div>
-              </div>
-            </div>
+            <!-- Hidden filter defaults -->
+            <input type="hidden" id="air-filter-interval" value="15000">
+            <input type="hidden" id="air-filter-km" value="">
+            <input type="hidden" id="cabin-filter-interval" value="15000">
+            <input type="hidden" id="cabin-filter-km" value="">
+            <input type="hidden" id="oil-filter-interval" value="10000">
+            <input type="hidden" id="oil-filter-km" value="">
 
             <button type="submit" class="bsub">✅ Mashinani Saqlash va SMS Yuborish</button>
           </form>
@@ -274,11 +250,28 @@
           </div>
           <form id="sms-config-form">
             <div class="fc">
-              <div class="fct">API Ulanish</div>
-              <div class="fg"><label>SMS API URL</label><input type="url" id="sms-api-url" placeholder="https://sms.example.com/send"></div>
+              <div class="fct">📱 DevSMS API Token</div>
+              <p style="font-size:12px;color:var(--text2);margin-bottom:10px">
+                <a href="https://devsms.uz" target="_blank" style="color:var(--accent)">devsms.uz</a> dan ro'yxatdan o'ting → API Token oling
+              </p>
+              <div class="fg">
+                <label>API Token</label>
+                <input type="text" id="devsms-token" placeholder="eyJhbGciOiJIUz..." autocomplete="off">
+              </div>
               <div class="tr">
                 <label class="tl">SMS yoqish</label>
                 <label class="tg"><input type="checkbox" id="sms-enabled"><span class="ts"></span></label>
+              </div>
+              <button type="submit" class="bsub" style="margin-top:12px">✅ Saqlash va Ishga Tushurish</button>
+            </div>
+            <div class="fc">
+              <div class="fct">🗄️ Supabase Ulanish</div>
+              <p style="font-size:12px;color:var(--text2);margin-bottom:10px">Mashina va xizmat ma'lumotlarini Supabase bazasiga saqlash uchun</p>
+              <div class="fg"><label>Supabase URL</label><input type="url" id="supabase-url" placeholder="https://xxxx.supabase.co"></div>
+              <div class="fg"><label>Supabase Anon Key</label><input type="text" id="supabase-key" placeholder="eyJhbGciOiJIUzI1NiIs..."></div>
+              <div class="tr">
+                <label class="tl">Supabaza yoqish</label>
+                <label class="tg"><input type="checkbox" id="supabase-enabled"><span class="ts"></span></label>
               </div>
             </div>
             <div class="fc">
@@ -297,27 +290,10 @@
                 <textarea id="sms-oil-message" rows="3" placeholder="{car_name} ({car_number}) — dvigatel moyi: {oil_brand}&#10;📅 {date} {time} · 🏁 {km} km"></textarea>
               </div>
               <div class="fg">
-                <label>🔵 Antifriz</label>
-                <textarea id="sms-antifreeze-message" rows="3" placeholder="{car_name} ({car_number}) — antifriz yangilandi&#10;📅 {date} {time} · 🏁 {km} km"></textarea>
-              </div>
-              <div class="fg">
                 <label>🟢 Karobka Moyi</label>
                 <textarea id="sms-gearbox-message" rows="3" placeholder="{car_name} ({car_number}) — karobka moyi yangilandi&#10;📅 {date} {time} · 🏁 {km} km"></textarea>
               </div>
-              <div class="fg">
-                <label>💨 Havo Filtr</label>
-                <textarea id="sms-air-filter-message" rows="3" placeholder="{car_name} ({car_number}) — havo filtr almashtirildi&#10;📅 {date} {time} · 🏁 {km} km"></textarea>
-              </div>
-              <div class="fg">
-                <label>🌬️ Salon Filtr</label>
-                <textarea id="sms-cabin-filter-message" rows="3" placeholder="{car_name} ({car_number}) — salon filtr almashtirildi&#10;📅 {date} {time} · 🏁 {km} km"></textarea>
-              </div>
-              <div class="fg">
-                <label>🔩 Moy Filtr</label>
-                <textarea id="sms-oil-filter-message" rows="3" placeholder="{car_name} ({car_number}) — moy filtr almashtirildi&#10;📅 {date} {time} · 🏁 {km} km"></textarea>
-              </div>
             </div>
-            <button type="submit" class="bsub">💾 Saqlash</button>
           </form>
         </div>
       </div>

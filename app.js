@@ -12,13 +12,11 @@ const DB = {
 
 // ===== DEFAULT SMS TEMPLATES =====
 const DEFAULT_SMS = {
-  save_message:         '{car_name} ({car_number}) saqlandi!\n📅 {date} {time}\n🔧 Almashtirildi: {services}\n🏁 Probeg: {km} km',
-  oil_message:          '{car_name} ({car_number}) — dvigatel moyi: {oil_brand}\n📅 {date} {time} · 🏁 {km} km',
-  antifreeze_message:   '{car_name} ({car_number}) — antifriz yangilandi\n📅 {date} {time} · 🏁 {km} km',
-  gearbox_message:      '{car_name} ({car_number}) — karobka moyi yangilandi\n📅 {date} {time} · 🏁 {km} km',
-  air_filter_message:   '{car_name} ({car_number}) — havo filtr almashtirildi\n📅 {date} {time} · 🏁 {km} km',
-  cabin_filter_message: '{car_name} ({car_number}) — salon filtr almashtirildi\n📅 {date} {time} · 🏁 {km} km',
-  oil_filter_message:   '{car_name} ({car_number}) — moy filtr almashtirildi\n📅 {date} {time} · 🏁 {km} km',
+  save_message:    '{car_name} ({car_number}) saqlandi!\n📅 {date} {time}\n🔧 Almashtirildi: {services}\n🏁 Probeg: {km} km',
+  oil_message:     '{car_name} ({car_number}) — dvigatel moyi almashtirildi: {oil_brand}\n📅 {date} {time} · 🏁 {km} km',
+  gearbox_message: '{car_name} ({car_number}) — karobka moyi almashtirildi\n📅 {date} {time} · 🏁 {km} km',
+  // Qolgan xizmatlar uchun umumiy shablon
+  default_change_message: '{car_name} ({car_number}) — {service_label} almashtirildi\n📅 {date} {time} · 🏁 {km} km',
 };
 
 // ===== STATE =====
@@ -28,7 +26,7 @@ let allOils   = DB.get('oils', [
   { id: 2, name: 'SAE 5W-40',  interval: 7000  },
   { id: 3, name: 'SAE 10W-40', interval: 8000  }
 ]);
-let smsConfig = DB.get('sms', { api_url: '', enabled: false, sms_sent_count: 0, ...DEFAULT_SMS });
+let smsConfig = DB.get('sms', { api_url: '', enabled: false, sms_sent_count: 0, devsms_token: '', supabase_url: '', supabase_key: '', supabase_enabled: false, ...DEFAULT_SMS });
 let cfg       = DB.get('cfg', { warn_pct: 80, danger_pct: 100, theme: 'dark' });
 let WPCT      = cfg.warn_pct   / 100;
 let DPCT      = cfg.danger_pct / 100;
@@ -337,9 +335,137 @@ function buildSaveSmsText(car, checkedKeys) {
     .replace(/{remain_km}/g,   '—');
 }
 
-// Mock SMS send
-function mockSend(text, phone) {
-  console.log(`📤 SMS → ${phone || '?'}\n${text}`);
+// ===== DEVSMS API =====
+async function sendSms(text, phone) {
+  const token = smsConfig.devsms_token;
+  if (!token || !phone) {
+    console.log(`📤 SMS (token yo'q) → ${phone}\n${text}`);
+    return { ok: false };
+  }
+  try {
+    const r = await fetch('https://devsms.uz/api/send_sms.php', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ phone: phone.replace(/\D/g, ''), message: text })
+    });
+    const data = await r.json().catch(() => ({}));
+    console.log('DevSMS javob:', data);
+    return data;
+  } catch(e) {
+    console.warn('SMS xatosi:', e);
+    return { ok: false };
+  }
+}
+
+// ===== AVTOMATIK TEKSHIRUV (uzluksiz) =====
+// Har 60 soniyada bir barcha mashinalarni tekshiradi
+// Agar status 🔴 bo'lsa va bugun SMS yuborilmagan bo'lsa → SMS yuboradi
+const AUTO_CHECK_INTERVAL = 60 * 1000; // 60 soniya
+const SENT_TODAY_KEY = 'auto_sms_sent'; // { 'carId_type': 'YYYY-MM-DD' }
+
+function todayStr() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function wasSentToday(carId, type) {
+  const log = DB.get(SENT_TODAY_KEY, {});
+  return log[carId + '_' + type] === todayStr();
+}
+
+function markSentToday(carId, type) {
+  const log = DB.get(SENT_TODAY_KEY, {});
+  log[carId + '_' + type] = todayStr();
+  // Eski yozuvlarni tozalaymiz (7 kundan eski)
+  const week = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+  Object.keys(log).forEach(k => { if (log[k] < week) delete log[k]; });
+  DB.set(SENT_TODAY_KEY, log);
+}
+
+async function autoCheckAndSend() {
+  if (!smsConfig.enabled || !smsConfig.devsms_token) return;
+
+  const svcs = [
+    { key: 'oil',          getU: car => (car.total_km - car.oil_change_km) / oilInt(car.oil_name) },
+    { key: 'antifreeze',   getU: car => (car.total_km - car.antifreeze_km) / (car.antifreeze_interval || 30000) },
+    { key: 'gearbox',      getU: car => (car.total_km - car.gearbox_km)    / (car.gearbox_interval    || 50000) },
+    { key: 'air_filter',   getU: car => (car.total_km - (car.air_filter_km   || car.total_km)) / (car.air_filter_interval   || 15000) },
+    { key: 'cabin_filter', getU: car => (car.total_km - (car.cabin_filter_km || car.total_km)) / (car.cabin_filter_interval || 15000) },
+    { key: 'oil_filter',   getU: car => (car.total_km - (car.oil_filter_km  || car.total_km)) / (car.oil_filter_interval   || 10000) },
+  ];
+
+  for (const car of allCars) {
+    if (!car.phone_number) continue;
+    for (const svc of svcs) {
+      const u = svc.getU(car);
+      if (u >= DPCT && !wasSentToday(car.id, svc.key)) {
+        // 🔴 status — SMS yuborish
+        const svcLabel = SVC_META[svc.key]?.label || svc.key;
+        const tplKey   = svc.key + '_message';
+        const tmpl     = smsConfig[tplKey] || DEFAULT_SMS[tplKey] || DEFAULT_SMS.default_change_message;
+        const text     = fillTemplate(tmpl, car, svc.key).replace(/{service_label}/g, svcLabel);
+        await sendSms(text, car.phone_number);
+        markSentToday(car.id, svc.key);
+        smsConfig.sms_sent_count = (smsConfig.sms_sent_count || 0) + 1;
+        saveSms();
+        console.log(`🔴 Auto SMS → ${car.car_name} · ${svcLabel}`);
+      }
+    }
+  }
+}
+
+// Avtomatik tekshiruvni ishga tushurish
+let autoCheckTimer = null;
+function startAutoCheck() {
+  if (autoCheckTimer) clearInterval(autoCheckTimer);
+  autoCheckTimer = setInterval(autoCheckAndSend, AUTO_CHECK_INTERVAL);
+  console.log('✅ Avtomatik SMS tekshiruv ishga tushdi (60s interval)');
+}
+
+// ===== SUPABASE =====
+async function supabaseReq(path, method, body) {
+  const url = smsConfig.supabase_url;
+  const key = smsConfig.supabase_key;
+  if (!smsConfig.supabase_enabled || !url || !key) return null;
+  try {
+    const r = await fetch(url.replace(/\/$/, '') + '/rest/v1/' + path, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': key,
+        'Authorization': 'Bearer ' + key,
+        'Prefer': 'return=minimal'
+      },
+      body: body ? JSON.stringify(body) : undefined
+    });
+    return r.ok ? r : null;
+  } catch(e) {
+    console.warn('Supabase xatosi:', e);
+    return null;
+  }
+}
+
+async function supabaseSaveCar(car) {
+  await supabaseReq('cars?on_conflict=car_number', 'POST', {
+    car_name: car.car_name,
+    car_number: car.car_number,
+    phone_number: car.phone_number,
+    total_km: car.total_km,
+    oil_name: car.oil_name,
+    added_at: car.added_at
+  });
+}
+
+async function supabaseSaveServiceChange(car, type, km) {
+  await supabaseReq('service_logs', 'POST', {
+    car_name: car.car_name,
+    car_number: car.car_number,
+    service_type: type,
+    km_at_change: km,
+    changed_at: new Date().toISOString()
+  });
 }
 
 // ===== ADD CAR SUBMIT =====
@@ -391,11 +517,12 @@ document.getElementById('add-car-form').addEventListener('submit', e => {
 
   allCars.push(car);
   saveCars();
+  supabaseSaveCar(car);
 
   // Send SMS if enabled
   if (smsConfig.enabled && smsConfig.api_url && car.phone_number) {
     const smsText = buildSaveSmsText(car, checkedKeys);
-    mockSend(smsText, car.phone_number);
+    sendSms(smsText, car.phone_number);
     smsConfig.sms_sent_count = (smsConfig.sms_sent_count || 0) + 1;
     saveSms();
     showToast('✅ Mashina saqlandi · SMS yuborildi!', 'success');
@@ -433,36 +560,37 @@ function deleteOil(id) {
 
 // ===== SMS PAGE =====
 function loadSmsPage() {
-  document.getElementById('sms-api-url').value               = smsConfig.api_url              || '';
-  document.getElementById('sms-enabled').checked             = !!smsConfig.enabled;
-  document.getElementById('sms-save-message').value          = smsConfig.save_message          || DEFAULT_SMS.save_message;
-  document.getElementById('sms-oil-message').value           = smsConfig.oil_message           || DEFAULT_SMS.oil_message;
-  document.getElementById('sms-antifreeze-message').value    = smsConfig.antifreeze_message    || DEFAULT_SMS.antifreeze_message;
-  document.getElementById('sms-gearbox-message').value       = smsConfig.gearbox_message       || DEFAULT_SMS.gearbox_message;
-  document.getElementById('sms-air-filter-message').value    = smsConfig.air_filter_message    || DEFAULT_SMS.air_filter_message;
-  document.getElementById('sms-cabin-filter-message').value  = smsConfig.cabin_filter_message  || DEFAULT_SMS.cabin_filter_message;
-  document.getElementById('sms-oil-filter-message').value    = smsConfig.oil_filter_message    || DEFAULT_SMS.oil_filter_message;
-  document.getElementById('sms-sent-count').textContent      = (smsConfig.sms_sent_count || 0).toLocaleString();
+  document.getElementById('devsms-token').value     = smsConfig.devsms_token  || '';
+  document.getElementById('sms-enabled').checked    = !!smsConfig.enabled;
+  document.getElementById('supabase-url').value     = smsConfig.supabase_url  || '';
+  document.getElementById('supabase-key').value     = smsConfig.supabase_key  || '';
+  document.getElementById('supabase-enabled').checked = !!smsConfig.supabase_enabled;
+  document.getElementById('sms-save-message').value = smsConfig.save_message || DEFAULT_SMS.save_message;
+  document.getElementById('sms-oil-message').value  = smsConfig.oil_message  || DEFAULT_SMS.oil_message;
+  document.getElementById('sms-gearbox-message').value = smsConfig.gearbox_message || DEFAULT_SMS.gearbox_message;
+  document.getElementById('sms-sent-count').textContent = (smsConfig.sms_sent_count || 0).toLocaleString();
   const ae = document.getElementById('sms-api-status');
-  ae.textContent = smsConfig.api_url ? '✅ Kiritilgan' : '❌ Kiritilmagan';
-  ae.style.color = smsConfig.api_url ? 'var(--success)' : 'var(--danger)';
+  ae.textContent = smsConfig.devsms_token ? '✅ Token kiritilgan' : '❌ Token kiritilmagan';
+  ae.style.color = smsConfig.devsms_token ? 'var(--success)' : 'var(--danger)';
   const card = document.getElementById('sms-status-card'), el = document.getElementById('sms-status');
-  if (smsConfig.enabled && smsConfig.api_url) { el.textContent = '✅ SMS faol'; card.classList.add('on'); }
-  else if (!smsConfig.api_url)                { el.textContent = '⚠️ API URL kiritilmagan'; card.classList.remove('on'); }
-  else                                         { el.textContent = '❌ SMS o\'chirilgan'; card.classList.remove('on'); }
+  if (smsConfig.enabled && smsConfig.devsms_token) { el.textContent = '✅ SMS faol'; card.classList.add('on'); }
+  else if (!smsConfig.devsms_token)               { el.textContent = '⚠️ DevSMS token kiritilmagan'; card.classList.remove('on'); }
+  else                                              { el.textContent = '❌ SMS o\'chirilgan'; card.classList.remove('on'); }
 }
 document.getElementById('sms-config-form').addEventListener('submit', e => {
   e.preventDefault();
-  smsConfig.api_url              = document.getElementById('sms-api-url').value;
-  smsConfig.enabled              = document.getElementById('sms-enabled').checked;
-  smsConfig.save_message         = document.getElementById('sms-save-message').value;
-  smsConfig.oil_message          = document.getElementById('sms-oil-message').value;
-  smsConfig.antifreeze_message   = document.getElementById('sms-antifreeze-message').value;
-  smsConfig.gearbox_message      = document.getElementById('sms-gearbox-message').value;
-  smsConfig.air_filter_message   = document.getElementById('sms-air-filter-message').value;
-  smsConfig.cabin_filter_message = document.getElementById('sms-cabin-filter-message').value;
-  smsConfig.oil_filter_message   = document.getElementById('sms-oil-filter-message').value;
-  saveSms(); showToast('✅ SMS sozlamalari saqlandi!', 'success'); loadSmsPage();
+  smsConfig.devsms_token      = document.getElementById('devsms-token').value.trim();
+  smsConfig.enabled           = document.getElementById('sms-enabled').checked;
+  smsConfig.supabase_url      = document.getElementById('supabase-url').value;
+  smsConfig.supabase_key      = document.getElementById('supabase-key').value;
+  smsConfig.supabase_enabled  = document.getElementById('supabase-enabled').checked;
+  smsConfig.save_message      = document.getElementById('sms-save-message').value;
+  smsConfig.oil_message       = document.getElementById('sms-oil-message').value;
+  smsConfig.gearbox_message   = document.getElementById('sms-gearbox-message').value;
+  saveSms();
+  startAutoCheck(); // Yangi token bilan qayta ishga tushurish
+  showToast('✅ SMS sozlamalari saqlandi!', 'success');
+  loadSmsPage();
 });
 function resetSmsCount() {
   if (!confirm('Hisoblagichni nolga tiklaysizmi?')) return;
@@ -577,14 +705,18 @@ document.getElementById('btn-change-svc').addEventListener('click', () => {
   // SMS
   if (smsConfig.enabled && smsConfig.api_url) {
     const tplKey = type + '_message';
-    const tmpl   = smsConfig[tplKey] || DEFAULT_SMS[tplKey] || '';
-    const filled = fillTemplate(tmpl, curCar, type);
-    mockSend(filled, curCar.phone_number);
+    // oil va gearbox uchun o'z shabloni, qolganlar uchun umumiy shablon
+    const tmpl = smsConfig[tplKey] || DEFAULT_SMS[tplKey] || DEFAULT_SMS.default_change_message;
+    const svcLabel = SVC_META[type]?.label || type;
+    const filled = fillTemplate(tmpl, curCar, type).replace(/{service_label}/g, svcLabel);
+    sendSms(filled, curCar.phone_number);
     smsConfig.sms_sent_count = (smsConfig.sms_sent_count || 0) + 1; saveSms();
-    showToast('✅ ' + (SVC_META[type]?.label || 'Xizmat') + ' · SMS yuborildi!', 'success');
+    showToast('✅ ' + svcLabel + ' · SMS yuborildi!', 'success');
   } else {
     showToast('✅ ' + (SVC_META[type]?.label || 'Xizmat') + ' almashtirildi!', 'success');
   }
+  // Supabase saqlash
+  supabaseSaveServiceChange(curCar, type, km);
   openModal(); loadDashboard();
 });
 
@@ -637,5 +769,6 @@ function init() {
   if (!DB.get('oils_init', false)) { saveOils(); DB.set('oils_init', true); }
   loadDashboard();
   renderOilSel('oil-name');
+  startAutoCheck(); // Avtomatik SMS tekshiruvni boshlash
 }
 init();
