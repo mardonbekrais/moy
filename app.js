@@ -1,19 +1,18 @@
 // ================================================================
-// MOYTRACK PRO v4.2  —  app.js
-// Firebase Realtime Database · LocalStorage DB
+// MOYTRACK PRO v4.3  —  app.js
+// Firebase Realtime DB: cars · oils · sms_config · service_logs
 // ================================================================
 
-// ===== FIREBASE CONFIG =====
 const FIREBASE_URL = 'https://gilamuz-8308f-default-rtdb.firebaseio.com';
 
-// ===== DATABASE (LocalStorage) =====
+// ===== LOCAL DB =====
 const DB = {
   get(k, d = []) { try { const v = localStorage.getItem('mt_' + k); return v ? JSON.parse(v) : d; } catch { return d; } },
   set(k, v)      { try { localStorage.setItem('mt_' + k, JSON.stringify(v)); } catch(e) { console.warn(e); } },
   nextId(k)      { const id = this.get('_id_' + k, 0) + 1; this.set('_id_' + k, id); return id; }
 };
 
-// ===== FIREBASE API =====
+// ===== FIREBASE REST API =====
 const FB = {
   async get(path) {
     try {
@@ -23,17 +22,6 @@ const FB = {
       return { ok: true, status: r.status, data };
     } catch(e) { return { ok: false, status: 0, error: e.message }; }
   },
-  async post(path, body) {
-    try {
-      const r = await fetch(`${FIREBASE_URL}/${path}.json`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
-      const data = await r.json();
-      return { ok: r.ok, status: r.status, data };
-    } catch(e) { return { ok: false, status: 0, error: e.message }; }
-  },
   async put(path, body) {
     try {
       const r = await fetch(`${FIREBASE_URL}/${path}.json`, {
@@ -41,18 +29,7 @@ const FB = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
       });
-      const data = await r.json();
-      return { ok: r.ok, status: r.status, data };
-    } catch(e) { return { ok: false, status: 0, error: e.message }; }
-  },
-  async patch(path, body) {
-    try {
-      const r = await fetch(`${FIREBASE_URL}/${path}.json`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
-      const data = await r.json();
+      const data = await r.json().catch(() => null);
       return { ok: r.ok, status: r.status, data };
     } catch(e) { return { ok: false, status: 0, error: e.message }; }
   },
@@ -80,11 +57,10 @@ let allOils = DB.get('oils', [
   { id: 3, name: 'SAE 10W-40', interval: 8000  }
 ]);
 let smsConfig = DB.get('sms', {
-  api_url: '', enabled: false, sms_sent_count: 0, devsms_token: '',
+  devsms_token: '', enabled: false, sms_sent_count: 0,
   firebase_enabled: true,
   ...DEFAULT_SMS
 });
-
 let cfg  = DB.get('cfg', { warn_pct: 80, danger_pct: 100, theme: 'dark' });
 let WPCT = cfg.warn_pct   / 100;
 let DPCT = cfg.danger_pct / 100;
@@ -94,49 +70,6 @@ const saveCars = () => DB.set('cars', allCars);
 const saveOils = () => DB.set('oils', allOils);
 const saveSms  = () => DB.set('sms',  smsConfig);
 const saveCfg  = () => DB.set('cfg',  cfg);
-
-// Firebase dan mashinalarni yuklash
-async function loadCarsFromFirebase() {
-  try {
-    const r = await FB.get('cars');
-    if (r.ok && r.data && typeof r.data === 'object') {
-      const fbCars = Object.values(r.data).filter(Boolean).map(car => ({
-        ...car,
-        id: Number(car.id) || car.id
-      }));
-      if (fbCars.length > 0) {
-        allCars = fbCars;
-        saveCars();
-      }
-    }
-  } catch(e) { console.warn('Firebase cars yuklanmadi:', e); }
-
-  try {
-    const r = await FB.get('oils');
-    if (r.ok && r.data && typeof r.data === 'object') {
-      const fbOils = Object.values(r.data).filter(Boolean).map(o => ({
-        ...o,
-        id: Number(o.id) || o.id
-      }));
-      if (fbOils.length > 0) {
-        allOils = fbOils;
-        saveOils();
-      }
-    }
-  } catch(e) { console.warn('Firebase oils yuklanmadi:', e); }
-
-  try {
-    const r = await FB.get('sms_config');
-    if (r.ok && r.data && typeof r.data === 'object') {
-      smsConfig = { ...smsConfig, ...r.data };
-      saveSms();
-    }
-  } catch(e) { console.warn('Firebase sms_config yuklanmadi:', e); }
-
-  loadDashboard();
-  loadCarsGrid();
-  renderOilSel('oil-name');
-}
 
 // ===== SERVICE META =====
 const SVC_META = {
@@ -178,15 +111,185 @@ function carSt(car) {
 }
 
 function svcE(u) { return u >= DPCT ? '🔴' : u >= WPCT ? '🟡' : '🟢'; }
-
 function badgeOf(u) {
   if (u >= DPCT) return { t: '🔴 HOZIR!', c: 'bdn', b: 'd' };
   if (u >= WPCT) return { t: '🟡 Tez!',   c: 'bwn', b: 'w' };
   return { t: '🟢 Yaxshi', c: 'bok', b: '' };
 }
-
 function nowDate() { return new Date().toLocaleDateString('uz-UZ', { year: 'numeric', month: '2-digit', day: '2-digit' }); }
 function nowTime() { return new Date().toLocaleTimeString('uz-UZ', { hour: '2-digit', minute: '2-digit' }); }
+
+// ===== FIREBASE — YUKLASH =====
+// Barcha ma'lumotlarni Firebase dan yuklaydi:
+// cars, oils, sms_config
+async function loadFromFirebase() {
+  let changed = false;
+
+  // — CARS —
+  try {
+    const r = await FB.get('cars');
+    if (r.ok && r.data && typeof r.data === 'object') {
+      const fbCars = Object.values(r.data).filter(Boolean).map(c => ({ ...c, id: Number(c.id) || c.id }));
+      if (fbCars.length > 0) { allCars = fbCars; saveCars(); changed = true; }
+    }
+  } catch(e) { console.warn('Firebase cars:', e); }
+
+  // — OILS —
+  try {
+    const r = await FB.get('oils');
+    if (r.ok && r.data && typeof r.data === 'object') {
+      const fbOils = Object.values(r.data).filter(Boolean).map(o => ({ ...o, id: Number(o.id) || o.id }));
+      if (fbOils.length > 0) { allOils = fbOils; saveOils(); changed = true; }
+    }
+  } catch(e) { console.warn('Firebase oils:', e); }
+
+  // — SMS CONFIG —
+  try {
+    const r = await FB.get('sms_config');
+    if (r.ok && r.data && typeof r.data === 'object' && Object.keys(r.data).length > 0) {
+      // DEFAULT_SMS ni asosiy qilib Firebase ma'lumotini ustiga qo'yamiz
+      smsConfig = { ...DEFAULT_SMS, ...smsConfig, ...r.data };
+      // firebase_enabled ni har doim true qilamiz
+      smsConfig.firebase_enabled = true;
+      saveSms();
+      changed = true;
+    }
+  } catch(e) { console.warn('Firebase sms_config:', e); }
+
+  if (changed) {
+    loadDashboard();
+    loadCarsGrid();
+    renderOilSel('oil-name');
+    // Agar SMS sahifasi ochiq bo'lsa — yangilash
+    const smsPage = document.getElementById('sms');
+    if (smsPage?.classList.contains('active')) loadSmsPage();
+    // Agar oils sahifasi ochiq bo'lsa — yangilash
+    const oilsPage = document.getElementById('oils');
+    if (oilsPage?.classList.contains('active')) loadOilsPage();
+  }
+}
+
+// ===== FIREBASE — SAQLASH =====
+
+async function fbSaveCar(car) {
+  if (!smsConfig.firebase_enabled) return;
+  const r = await FB.put(`cars/car_${car.id}`, {
+    id: car.id, car_name: car.car_name, car_number: car.car_number,
+    phone_number: car.phone_number || '', total_km: car.total_km,
+    oil_name: car.oil_name, daily_km: car.daily_km || 50,
+    oil_change_km: car.oil_change_km,
+    antifreeze_km: car.antifreeze_km, antifreeze_interval: car.antifreeze_interval || 30000,
+    gearbox_km: car.gearbox_km,       gearbox_interval: car.gearbox_interval || 50000,
+    air_filter_km: car.air_filter_km || car.total_km,     air_filter_interval: car.air_filter_interval || 15000,
+    cabin_filter_km: car.cabin_filter_km || car.total_km, cabin_filter_interval: car.cabin_filter_interval || 15000,
+    oil_filter_km: car.oil_filter_km || car.total_km,     oil_filter_interval: car.oil_filter_interval || 10000,
+    history: car.history || [], added_at: car.added_at
+  });
+  if (r.ok) console.log('✅ FB cars: saqlandi', car.id);
+  else      console.warn('⚠️ FB cars xato:', r.status, r.error);
+}
+
+async function fbDeleteCar(carId) {
+  if (!smsConfig.firebase_enabled) return;
+  const r = await FB.delete(`cars/car_${carId}`);
+  if (r.ok) console.log('✅ FB cars: o\'chirildi', carId);
+  else      console.warn('⚠️ FB cars delete xato:', r.status);
+}
+
+async function fbSaveServiceLog(car, type, km) {
+  if (!smsConfig.firebase_enabled) return;
+  const logId = `log_${Date.now()}`;
+  const r = await FB.put(`service_logs/${logId}`, {
+    car_name: car.car_name, car_number: car.car_number,
+    service_type: type, km_at_change: km,
+    changed_at: new Date().toISOString()
+  });
+  if (r.ok) console.log('✅ FB service_logs: saqlandi');
+  else      console.warn('⚠️ FB service_logs xato:', r.status);
+}
+
+// ── OILS Firebase ga saqlash ──
+async function fbSaveOil(oil) {
+  if (!smsConfig.firebase_enabled) return;
+  const r = await FB.put(`oils/oil_${oil.id}`, { id: oil.id, name: oil.name, interval: oil.interval });
+  if (r.ok) console.log('✅ FB oils: saqlandi', oil.name);
+  else      console.warn('⚠️ FB oils xato:', r.status);
+}
+
+async function fbDeleteOil(oilId) {
+  if (!smsConfig.firebase_enabled) return;
+  const r = await FB.delete(`oils/oil_${oilId}`);
+  if (r.ok) console.log('✅ FB oils: o\'chirildi', oilId);
+  else      console.warn('⚠️ FB oils delete xato:', r.status);
+}
+
+// ── SMS CONFIG Firebase ga saqlash ──
+async function fbSaveSmsConfig() {
+  if (!smsConfig.firebase_enabled) return;
+  const data = {
+    devsms_token:           smsConfig.devsms_token           || '',
+    enabled:                smsConfig.enabled                || false,
+    sms_sent_count:         smsConfig.sms_sent_count         || 0,
+    firebase_enabled:       true,
+    save_message:           smsConfig.save_message           || DEFAULT_SMS.save_message,
+    oil_message:            smsConfig.oil_message            || DEFAULT_SMS.oil_message,
+    gearbox_message:        smsConfig.gearbox_message        || DEFAULT_SMS.gearbox_message,
+    default_change_message: smsConfig.default_change_message || DEFAULT_SMS.default_change_message,
+  };
+  const r = await FB.put('sms_config', data);
+  if (r.ok) console.log('✅ FB sms_config: saqlandi');
+  else      console.warn('⚠️ FB sms_config xato:', r.status, r.error);
+}
+
+// ── FIREBASE TEST ──
+async function testFirebase() {
+  const btn = document.getElementById('btn-test-firebase');
+  const res = document.getElementById('firebase-test-result');
+  btn.disabled  = true;
+  btn.className = 'btn-test-supa loading';
+  btn.innerHTML = '<span class="spin">⏳</span> Tekshirilmoqda...';
+  res.style.display = 'block';
+  res.className = 'supa-result loading';
+  res.innerHTML = '⏳ Firebase ga ulanmoqda...';
+
+  const result = await FB.get('_ping');
+
+  if (result.status === 0) {
+    btn.className = 'btn-test-supa fail';
+    btn.innerHTML = '❌ Ulanmadi';
+    res.className = 'supa-result fail';
+    res.innerHTML = `❌ <strong>Firebase ga ulanib bo'lmadi!</strong><br>
+      <span style="font-size:12px">Sabab: ${result.error || 'Tarmoq xatosi'}</span>`;
+  } else {
+    btn.className = 'btn-test-supa ok';
+    btn.innerHTML = '✅ Done — Ulanish ishlayapti';
+    res.className = 'supa-result ok';
+    res.innerHTML = `✅ <strong>Done!</strong> Firebase ulanish muvaffaqiyatli.<br>
+      <span style="font-size:12px">${FIREBASE_URL}</span>`;
+    smsConfig.firebase_enabled = true;
+    saveSms();
+    // Ulanish muvaffaqiyatli — hozirgi ma'lumotlarni Firebase ga yuborish
+    await syncAllToFirebase();
+  }
+  btn.disabled = false;
+  setTimeout(() => {
+    btn.className = 'btn-test-supa';
+    btn.innerHTML = '🔗 Ulanishni Tekshirish';
+    res.style.display = 'none';
+  }, 8000);
+}
+
+// Barcha local ma'lumotlarni Firebase ga yuborish
+async function syncAllToFirebase() {
+  showToast('🔄 Firebase ga sinxronlamoqda...', 'success');
+  // Cars
+  for (const car of allCars) { await fbSaveCar(car); }
+  // Oils
+  for (const oil of allOils) { await fbSaveOil(oil); }
+  // SMS config
+  await fbSaveSmsConfig();
+  showToast('✅ Firebase bilan sinxronlandi!', 'success');
+}
 
 // ===== NAVIGATION =====
 function navigateTo(page) {
@@ -216,9 +319,8 @@ function loadDashboard() {
   document.getElementById('good-stat').textContent    = g;
 
   const uel = document.getElementById('urgent-list');
-  const notif = [...uc, ...wc];
-  uel.innerHTML = notif.length
-    ? notif.map(ciHTML).join('')
+  uel.innerHTML = [...uc,...wc].length
+    ? [...uc,...wc].map(ciHTML).join('')
     : '<div class="empty"><div class="ei">🎉</div><p>Hammasi yaxshi!</p></div>';
   addCIE(uel);
 
@@ -230,8 +332,7 @@ function loadDashboard() {
 }
 
 function ciHTML(car) {
-  const s   = carSt(car);
-  const oi  = oilInt(car.oil_name);
+  const s  = carSt(car), oi = oilInt(car.oil_name);
   const oU  = (car.total_km - car.oil_change_km) / oi;
   const aU  = (car.total_km - car.antifreeze_km) / (car.antifreeze_interval || 30000);
   const gU  = (car.total_km - car.gearbox_km)    / (car.gearbox_interval    || 50000);
@@ -251,10 +352,8 @@ function ciHTML(car) {
 function addCIE(el) {
   el.querySelectorAll('.ci').forEach(e => {
     e.addEventListener('click', () => {
-      const id = e.dataset.id;
-      curCar = allCars.find(c => String(c.id) === String(id));
+      curCar = allCars.find(c => String(c.id) === String(e.dataset.id));
       if (curCar) openModal();
-      else console.warn('Mashina topilmadi, id:', id);
     });
   });
 }
@@ -262,16 +361,13 @@ function addCIE(el) {
 // ===== CARS GRID =====
 function loadCarsGrid(q = '') {
   const grid = document.getElementById('cars-grid');
-  const f = q
-    ? allCars.filter(c => c.car_number.toLowerCase().includes(q) || c.car_name.toLowerCase().includes(q))
-    : allCars;
+  const f = q ? allCars.filter(c => c.car_number.toLowerCase().includes(q) || c.car_name.toLowerCase().includes(q)) : allCars;
   if (!f.length) {
     grid.innerHTML = `<div class="empty" style="grid-column:1/-1"><div class="ei">${allCars.length ? '🔍' : '🚗'}</div><p>${allCars.length ? 'Topilmadi' : 'Mashinalar yo\'q'}</p></div>`;
     return;
   }
   grid.innerHTML = f.map(car => {
-    const s   = carSt(car);
-    const oi  = oilInt(car.oil_name);
+    const s  = carSt(car), oi = oilInt(car.oil_name);
     const oU  = (car.total_km - car.oil_change_km) / oi;
     const aU  = (car.total_km - car.antifreeze_km) / (car.antifreeze_interval || 30000);
     const gU  = (car.total_km - car.gearbox_km)    / (car.gearbox_interval    || 50000);
@@ -290,10 +386,8 @@ function loadCarsGrid(q = '') {
   }).join('');
   grid.querySelectorAll('.cc').forEach(e => {
     e.addEventListener('click', () => {
-      const id = e.dataset.id;
-      curCar = allCars.find(c => String(c.id) === String(id));
+      curCar = allCars.find(c => String(c.id) === String(e.dataset.id));
       if (curCar) openModal();
-      else console.warn('Mashina topilmadi, id:', id);
     });
   });
 }
@@ -315,38 +409,29 @@ function setPillStatus(svc, status, btn) {
   const km = parseFloat(document.getElementById('current-km')?.value) || 0;
   let interval, kmFieldId, hintId, pillHintId;
   if (svc === 'anti') {
-    interval   = parseFloat(document.getElementById('antifreeze-interval')?.value) || 30000;
-    kmFieldId  = 'antifreeze-km';
-    hintId     = 'antifreeze-hint';
-    pillHintId = 'anti-pill-hint';
+    interval = parseFloat(document.getElementById('antifreeze-interval')?.value) || 30000;
+    kmFieldId = 'antifreeze-km'; hintId = 'antifreeze-hint'; pillHintId = 'anti-pill-hint';
   } else {
-    interval   = parseFloat(document.getElementById('gearbox-interval')?.value) || 50000;
-    kmFieldId  = 'gearbox-km';
-    hintId     = 'gearbox-hint';
-    pillHintId = 'gear-pill-hint';
+    interval = parseFloat(document.getElementById('gearbox-interval')?.value) || 50000;
+    kmFieldId = 'gearbox-km'; hintId = 'gearbox-hint'; pillHintId = 'gear-pill-hint';
   }
   btn.closest('.pill-group').querySelectorAll('.pill-btn').forEach(b => b.classList.remove('active-pill'));
   btn.classList.add('active-pill');
   const pct   = status === 'green' ? 0.2 : status === 'yellow' ? 0.8 : 1.05;
   const kmVal = Math.max(0, Math.round(km - interval * pct));
   document.getElementById(kmFieldId).value = kmVal;
-  const labels = { green: ['🟢','green','Yaxshi holat'], yellow: ['🟡','yellow','Tez orada kerak'], red: ['🔴','red','Hoziroq kerak!'] };
+  const labels = { green:['🟢','green','Yaxshi holat'], yellow:['🟡','yellow','Tez orada kerak'], red:['🔴','red','Hoziroq kerak!'] };
   const [icon, cls, text] = labels[status];
-  const used = Math.max(0, km - kmVal);
-  setChip(pillHintId, cls, `${icon} ${text} · ${used.toLocaleString()} / ${interval.toLocaleString()} km`);
+  setChip(pillHintId, cls, `${icon} ${text} · ${Math.max(0,km-kmVal).toLocaleString()} / ${interval.toLocaleString()} km`);
   calcChip(hintId, km, kmVal, interval);
 }
 
 // ===== HINT CHIPS =====
-function setChip(id, cls, html) {
-  const el = document.getElementById(id); if (!el) return;
-  el.innerHTML = `<span class="sch ${cls}">${html}</span>`;
-}
+function setChip(id, cls, html) { const el = document.getElementById(id); if (!el) return; el.innerHTML = `<span class="sch ${cls}">${html}</span>`; }
 function clearChip(id) { const el = document.getElementById(id); if (el) el.innerHTML = ''; }
 function calcChip(hintId, totalKm, lastKm, interval) {
   if (!totalKm || !lastKm || !interval) { clearChip(hintId); return; }
-  const u    = (totalKm - lastKm) / interval;
-  const used = Math.max(0, totalKm - lastKm);
+  const u = (totalKm - lastKm) / interval, used = Math.max(0, totalKm - lastKm);
   if      (u >= DPCT) setChip(hintId, 'red',    `🔴 HOZIROQ — ${used.toLocaleString()} / ${interval.toLocaleString()} km`);
   else if (u >= WPCT) setChip(hintId, 'yellow', `🟡 Tez orada — ${used.toLocaleString()} / ${interval.toLocaleString()} km`);
   else                 setChip(hintId, 'green',  `🟢 Yaxshi — ${used.toLocaleString()} / ${interval.toLocaleString()} km`);
@@ -367,9 +452,7 @@ function setupHintListeners() {
     });
   });
   document.getElementById('oil-name')?.addEventListener('change', () => {
-    const km  = parseFloat(document.getElementById('current-km')?.value)||0;
-    const okm = parseFloat(document.getElementById('oil-change-km')?.value)||0;
-    calcChip('oil-hint', km, okm, oilInt(document.getElementById('oil-name')?.value));
+    calcChip('oil-hint', parseFloat(document.getElementById('current-km')?.value)||0, parseFloat(document.getElementById('oil-change-km')?.value)||0, oilInt(document.getElementById('oil-name')?.value));
   });
 }
 setupHintListeners();
@@ -393,17 +476,16 @@ function fillTemplate(tmpl, car, svcType) {
     .replace(/{time}/g,        nowTime())
     .replace(/{oil_brand}/g,   car.oil_name || '—');
 }
-
 function buildSaveSmsText(car, checkedKeys) {
   const tmpl = smsConfig.save_message || DEFAULT_SMS.save_message;
-  const servicesList = checkedKeys.map(k => { const m = SVC_META[k]; return m ? `${m.icon} ${m.label}` : k; }).join(', ');
+  const svcList = checkedKeys.map(k => { const m = SVC_META[k]; return m ? `${m.icon} ${m.label}` : k; }).join(', ');
   return tmpl
     .replace(/{car_name}/g,   car.car_name)
     .replace(/{car_number}/g, car.car_number)
     .replace(/{km}/g,         car.total_km.toLocaleString())
     .replace(/{date}/g,        nowDate())
     .replace(/{time}/g,        nowTime())
-    .replace(/{services}/g,    servicesList || 'Ko\'rsatilmagan')
+    .replace(/{services}/g,    svcList || 'Ko\'rsatilmagan')
     .replace(/{oil_brand}/g,   car.oil_name || '—');
 }
 
@@ -420,16 +502,12 @@ async function sendSms(text, phone) {
     const data = await r.json().catch(() => ({}));
     console.log('DevSMS javob:', data);
     return data;
-  } catch(e) {
-    console.warn('SMS xatosi:', e);
-    return { ok: false };
-  }
+  } catch(e) { console.warn('SMS xatosi:', e); return { ok: false }; }
 }
 
 // ===== AVTOMATIK TEKSHIRUV =====
 const AUTO_CHECK_INTERVAL = 60 * 1000;
 const SENT_TODAY_KEY = 'auto_sms_sent';
-
 function todayStr() { return new Date().toISOString().slice(0, 10); }
 function wasSentToday(carId, type) { const log = DB.get(SENT_TODAY_KEY, {}); return log[carId + '_' + type] === todayStr(); }
 function markSentToday(carId, type) {
@@ -439,7 +517,6 @@ function markSentToday(carId, type) {
   Object.keys(log).forEach(k => { if (log[k] < week) delete log[k]; });
   DB.set(SENT_TODAY_KEY, log);
 }
-
 async function autoCheckAndSend() {
   if (!smsConfig.enabled || !smsConfig.devsms_token) return;
   const svcs = [
@@ -463,126 +540,31 @@ async function autoCheckAndSend() {
         markSentToday(car.id, svc.key);
         smsConfig.sms_sent_count = (smsConfig.sms_sent_count || 0) + 1;
         saveSms();
+        await fbSaveSmsConfig();
       }
     }
   }
 }
-
 let autoCheckTimer = null;
 function startAutoCheck() {
   if (autoCheckTimer) clearInterval(autoCheckTimer);
   autoCheckTimer = setInterval(autoCheckAndSend, AUTO_CHECK_INTERVAL);
 }
 
-// ===== FIREBASE FUNCTIONS =====
-
-// Firebase ulanishini tekshirish
-async function testFirebase() {
-  const btn = document.getElementById('btn-test-firebase');
-  const res = document.getElementById('firebase-test-result');
-
-  btn.disabled  = true;
-  btn.className = 'btn-test-supa loading';
-  btn.innerHTML = '<span class="spin">⏳</span> Tekshirilmoqda...';
-  res.style.display = 'block';
-  res.className = 'supa-result loading';
-  res.innerHTML = '⏳ Firebase ga ulanmoqda...';
-
-  const result = await FB.get('_ping');
-
-  if (result.status === 0) {
-    btn.className = 'btn-test-supa fail';
-    btn.innerHTML = '❌ Ulanmadi';
-    res.className = 'supa-result fail';
-    res.innerHTML = `❌ <strong>Firebase ga ulanib bo'lmadi!</strong><br>
-      <span style="font-size:12px">Sabab: ${result.error || 'Tarmoq xatosi'}</span>`;
-  } else {
-    btn.className = 'btn-test-supa ok';
-    btn.innerHTML = '✅ Ulanish ishlayapti';
-    res.className = 'supa-result ok';
-    res.innerHTML = `✅ <strong>Firebase ulanish muvaffaqiyatli!</strong><br>
-      <span style="font-size:12px">URL: ${FIREBASE_URL}</span>`;
-    smsConfig.firebase_enabled = true;
-    saveSms();
-  }
-
-  btn.disabled = false;
-  setTimeout(() => {
-    btn.className = 'btn-test-supa';
-    btn.innerHTML = '🔗 Ulanishni Tekshirish';
-    res.style.display = 'none';
-  }, 10000);
-}
-
-// Mashina saqlash Firebase ga
-async function firebaseSaveCar(car) {
-  if (!smsConfig.firebase_enabled) return;
-  const data = {
-    id:           car.id,
-    car_name:     car.car_name,
-    car_number:   car.car_number,
-    phone_number: car.phone_number || '',
-    total_km:     car.total_km,
-    oil_name:     car.oil_name,
-    daily_km:     car.daily_km || 50,
-    oil_change_km:         car.oil_change_km,
-    antifreeze_km:         car.antifreeze_km,
-    antifreeze_interval:   car.antifreeze_interval || 30000,
-    gearbox_km:            car.gearbox_km,
-    gearbox_interval:      car.gearbox_interval || 50000,
-    air_filter_km:         car.air_filter_km || car.total_km,
-    air_filter_interval:   car.air_filter_interval || 15000,
-    cabin_filter_km:       car.cabin_filter_km || car.total_km,
-    cabin_filter_interval: car.cabin_filter_interval || 15000,
-    oil_filter_km:         car.oil_filter_km || car.total_km,
-    oil_filter_interval:   car.oil_filter_interval || 10000,
-    history:      car.history || [],
-    added_at:     car.added_at
-  };
-  const r = await FB.put(`cars/car_${car.id}`, data);
-  if (r.ok) console.log('✅ Firebase: mashina saqlandi', car.id);
-  else      console.warn('⚠️ Firebase cars xato:', r.status, r.error);
-}
-
-// Xizmat o'zgarishini saqlash Firebase ga
-async function firebaseSaveServiceChange(car, type, km) {
-  if (!smsConfig.firebase_enabled) return;
-  const logId = Date.now();
-  const data = {
-    car_name:    car.car_name,
-    car_number:  car.car_number,
-    service_type: type,
-    km_at_change: km,
-    changed_at:  new Date().toISOString()
-  };
-  const r = await FB.put(`service_logs/${logId}`, data);
-  if (r.ok) console.log('✅ Firebase: xizmat saqlandi');
-  else      console.warn('⚠️ Firebase service_logs xato:', r.status, r.error);
-}
-
-// Mashina o'chirish Firebase dan
-async function firebaseDeleteCar(carId) {
-  if (!smsConfig.firebase_enabled) return;
-  const r = await FB.delete(`cars/car_${carId}`);
-  if (r.ok) console.log('✅ Firebase: mashina o\'chirildi');
-  else      console.warn('⚠️ Firebase delete xato:', r.status);
-}
-
 // ===== ADD CAR =====
 document.getElementById('add-car-form').addEventListener('submit', e => {
   e.preventDefault();
-  const km     = parseInt(document.getElementById('current-km').value)   || 0;
-  const name   = document.getElementById('car-name').value.trim();
-  const number = document.getElementById('car-number').value.trim();
-  const oil    = document.getElementById('oil-name').value;
-  if (!name || !number || !oil) { showToast('❌ Barcha maydonlarni to\'ldiring', 'error'); return; }
+  const km   = parseInt(document.getElementById('current-km').value) || 0;
+  const name = document.getElementById('car-name').value.trim();
+  const num  = document.getElementById('car-number').value.trim();
+  const oil  = document.getElementById('oil-name').value;
+  if (!name || !num || !oil) { showToast('❌ Barcha maydonlarni to\'ldiring', 'error'); return; }
 
   const car = {
-    id:                   DB.nextId('car'),
-    car_name:             name, car_number: number,
+    id: DB.nextId('car'), car_name: name, car_number: num,
     daily_km:             parseInt(document.getElementById('daily-km').value)              || 50,
     phone_number:         document.getElementById('phone-number').value.trim(),
-    oil_name:             oil, total_km: km,
+    oil_name: oil, total_km: km,
     oil_change_km:        parseInt(document.getElementById('oil-change-km').value)         || km,
     antifreeze_km:        parseInt(document.getElementById('antifreeze-km').value)         || km,
     gearbox_km:           parseInt(document.getElementById('gearbox-km').value)            || km,
@@ -599,8 +581,7 @@ document.getElementById('add-car-form').addEventListener('submit', e => {
 
   const checkedKeys = [];
   document.querySelectorAll('.check-item.checked').forEach(el => {
-    const key = el.dataset.key;
-    checkedKeys.push(key);
+    const key = el.dataset.key; checkedKeys.push(key);
     car.history.push({ type: key, km: car.total_km, oil_name: key === 'oil' ? oil : null, date: car.added_at });
     if (key === 'oil')          car.oil_change_km   = km;
     if (key === 'antifreeze')   car.antifreeze_km   = km;
@@ -610,92 +591,59 @@ document.getElementById('add-car-form').addEventListener('submit', e => {
     if (key === 'oil_filter')   car.oil_filter_km   = km;
   });
 
-  allCars.push(car);
-  saveCars();
-  firebaseSaveCar(car);
+  allCars.push(car); saveCars();
+  fbSaveCar(car); // Firebase ga saqlash
 
   if (smsConfig.enabled && smsConfig.devsms_token && car.phone_number) {
     const smsText = buildSaveSmsText(car, checkedKeys);
     sendSms(smsText, car.phone_number);
     smsConfig.sms_sent_count = (smsConfig.sms_sent_count || 0) + 1;
-    saveSms();
-    firebaseSaveSmsConfig();
+    saveSms(); fbSaveSmsConfig();
     showToast('✅ Saqlandi · SMS yuborildi!', 'success');
   } else {
     showToast('✅ Mashina qo\'shildi!', 'success');
   }
-  resetAddCarForm();
-  navigateTo('cars');
+  resetAddCarForm(); navigateTo('cars');
 });
-
-// ===== FIREBASE SMS CONFIG =====
-async function firebaseSaveSmsConfig() {
-  if (!smsConfig.firebase_enabled) return;
-  const r = await FB.put('sms_config', {
-    devsms_token:      smsConfig.devsms_token      || '',
-    enabled:           smsConfig.enabled            || false,
-    sms_sent_count:    smsConfig.sms_sent_count     || 0,
-    firebase_enabled:  smsConfig.firebase_enabled   || true,
-    save_message:      smsConfig.save_message       || DEFAULT_SMS.save_message,
-    oil_message:       smsConfig.oil_message        || DEFAULT_SMS.oil_message,
-    gearbox_message:   smsConfig.gearbox_message    || DEFAULT_SMS.gearbox_message,
-    default_change_message: smsConfig.default_change_message || DEFAULT_SMS.default_change_message,
-  });
-  if (r.ok) console.log('✅ Firebase: SMS config saqlandi');
-  else      console.warn('⚠️ Firebase sms_config xato:', r.status);
-}
-
-// ===== FIREBASE OILS =====
-async function firebaseSaveOil(oil) {
-  if (!smsConfig.firebase_enabled) return;
-  const r = await FB.put(`oils/oil_${oil.id}`, { id: oil.id, name: oil.name, interval: oil.interval });
-  if (r.ok) console.log('✅ Firebase: moy saqlandi');
-  else      console.warn('⚠️ Firebase oils xato:', r.status);
-}
-async function firebaseDeleteOil(oilId) {
-  if (!smsConfig.firebase_enabled) return;
-  const r = await FB.delete(`oils/oil_${oilId}`);
-  if (r.ok) console.log('✅ Firebase: moy o\'chirildi');
-  else      console.warn('⚠️ Firebase oils delete xato:', r.status);
-}
 
 // ===== OILS PAGE =====
 function loadOilsPage() {
   const list = document.getElementById('oils-list');
   list.innerHTML = allOils.length
-    ? allOils.map(o => `<div class="oi"><div><div class="on">🛢️ ${o.name}</div><div class="oint">📍 ${o.interval.toLocaleString()} km</div></div><button class="odel" onclick="deleteOil(${o.id})">🗑️</button></div>`).join('')
+    ? allOils.map(o => `<div class="oi">
+        <div><div class="on">🛢️ ${o.name}</div><div class="oint">📍 ${o.interval.toLocaleString()} km</div></div>
+        <button class="odel" onclick="deleteOil(${o.id})">🗑️</button>
+      </div>`).join('')
     : '<div class="empty"><div class="ei">🛢️</div><p>Hech qanday moy yo\'q</p></div>';
 }
 document.getElementById('add-oil-form').addEventListener('submit', e => {
   e.preventDefault();
-  const name = document.getElementById('oil-name-input').value.trim();
+  const name     = document.getElementById('oil-name-input').value.trim();
   const interval = parseInt(document.getElementById('oil-interval-input').value);
   if (!name || !interval) { showToast('❌ To\'ldiring', 'error'); return; }
   const oil = { id: DB.nextId('oil'), name, interval };
-  allOils.push(oil);
-  saveOils();
-  firebaseSaveOil(oil);
+  allOils.push(oil); saveOils();
+  fbSaveOil(oil); // ← Firebase ga saqlash
   showToast('✅ Moy turi qo\'shildi!', 'success');
   document.getElementById('add-oil-form').reset();
-  loadOilsPage();
-  renderOilSel('oil-name');
+  loadOilsPage(); renderOilSel('oil-name');
 });
 function deleteOil(id) {
   if (!confirm('Moy turini o\'chirasizmi?')) return;
-  allOils = allOils.filter(o => o.id !== id);
-  saveOils();
-  firebaseDeleteOil(id);
+  allOils = allOils.filter(o => o.id !== id); saveOils();
+  fbDeleteOil(id); // ← Firebase dan o'chirish
   showToast('✅ O\'chirildi!', 'success');
-  loadOilsPage();
-  renderOilSel('oil-name');
+  loadOilsPage(); renderOilSel('oil-name');
 }
 
 // ===== SMS PAGE =====
 function loadSmsPage() {
   document.getElementById('devsms-token').value        = smsConfig.devsms_token  || '';
   document.getElementById('sms-enabled').checked       = !!smsConfig.enabled;
-  document.getElementById('firebase-url-display').textContent = FIREBASE_URL;
-  document.getElementById('firebase-enabled').checked  = !!smsConfig.firebase_enabled;
+  const fbUrlEl = document.getElementById('firebase-url-display');
+  if (fbUrlEl) fbUrlEl.textContent = FIREBASE_URL;
+  const fbEnEl = document.getElementById('firebase-enabled');
+  if (fbEnEl) fbEnEl.checked = !!smsConfig.firebase_enabled;
   document.getElementById('sms-save-message').value    = smsConfig.save_message    || DEFAULT_SMS.save_message;
   document.getElementById('sms-oil-message').value     = smsConfig.oil_message     || DEFAULT_SMS.oil_message;
   document.getElementById('sms-gearbox-message').value = smsConfig.gearbox_message || DEFAULT_SMS.gearbox_message;
@@ -715,23 +663,21 @@ document.getElementById('sms-config-form').addEventListener('submit', e => {
   e.preventDefault();
   smsConfig.devsms_token      = document.getElementById('devsms-token').value.trim();
   smsConfig.enabled           = document.getElementById('sms-enabled').checked;
-  smsConfig.firebase_enabled  = document.getElementById('firebase-enabled').checked;
+  smsConfig.firebase_enabled  = document.getElementById('firebase-enabled')?.checked ?? true;
   smsConfig.save_message      = document.getElementById('sms-save-message').value;
   smsConfig.oil_message       = document.getElementById('sms-oil-message').value;
   smsConfig.gearbox_message   = document.getElementById('sms-gearbox-message').value;
   saveSms();
-  firebaseSaveSmsConfig();
+  fbSaveSmsConfig(); // ← Firebase ga SMS config saqlash
   startAutoCheck();
   showToast('✅ SMS sozlamalari saqlandi!', 'success');
   loadSmsPage();
 });
 function resetSmsCount() {
   if (!confirm('Hisoblagichni nolga tiklaysizmi?')) return;
-  smsConfig.sms_sent_count = 0;
-  saveSms();
-  firebaseSaveSmsConfig();
-  showToast('✅ Tiklandi', 'success');
-  loadSmsPage();
+  smsConfig.sms_sent_count = 0; saveSms();
+  fbSaveSmsConfig(); // ← Firebase ga yangilash
+  showToast('✅ Tiklandi', 'success'); loadSmsPage();
 }
 
 // ===== CAR MODAL =====
@@ -755,7 +701,6 @@ function openModal() {
       <div class="pb"><div class="pf ${b.b}" style="width:${Math.min(u*100,100).toFixed(1)}%"></div></div>
       <div class="skm">${used.toLocaleString()} / ${interval.toLocaleString()} km</div></div>`;
   };
-
   document.getElementById('modal-services').innerHTML =
     svcBlock(oU,  `🛢️ Dvigatel Moyi — <em style="font-weight:400;font-size:11px">${curCar.oil_name}</em>`, curCar.total_km - curCar.oil_change_km, oi) +
     svcBlock(aU,  '🔵 Antifriz',    curCar.total_km - curCar.antifreeze_km,  curCar.antifreeze_interval  || 30000) +
@@ -766,8 +711,7 @@ function openModal() {
 
   document.getElementById('modal-km').value = curCar.total_km;
   renderOilSel('modal-oil-select', curCar.oil_name);
-
-  const svcSel  = document.getElementById('modal-svc-type');
+  const svcSel = document.getElementById('modal-svc-type');
   const oilWrap = document.getElementById('modal-oil-wrap');
   oilWrap.style.display = svcSel.value === 'oil' ? '' : 'none';
   svcSel.onchange = () => { oilWrap.style.display = svcSel.value === 'oil' ? '' : 'none'; };
@@ -789,10 +733,10 @@ function loadHistory() {
   if (!hist.length) { el.innerHTML = '<div class="empty"><div class="ei">📭</div><p>Tarix yo\'q</p></div>'; return; }
   const today = new Date().toDateString();
   el.innerHTML = [...hist].reverse().map(log => {
-    const d   = new Date(log.date), isT = d.toDateString() === today;
-    const m   = SVC_META[log.type] || { icon: '🔧', label: log.type };
-    const ds  = isT ? '<span class="htlbl">Bugun ✅</span>' : d.toLocaleDateString('uz-UZ', { year: 'numeric', month: '2-digit', day: '2-digit' });
-    const ts  = d.toLocaleTimeString('uz-UZ', { hour: '2-digit', minute: '2-digit' });
+    const d = new Date(log.date), isT = d.toDateString() === today;
+    const m = SVC_META[log.type] || { icon: '🔧', label: log.type };
+    const ds = isT ? '<span class="htlbl">Bugun ✅</span>' : d.toLocaleDateString('uz-UZ', { year: 'numeric', month: '2-digit', day: '2-digit' });
+    const ts = d.toLocaleTimeString('uz-UZ', { hour: '2-digit', minute: '2-digit' });
     return `<div class="hi${isT ? ' htd' : ''}">
       <div class="hico">${m.icon}</div>
       <div>
@@ -818,7 +762,7 @@ document.getElementById('btn-update-km').addEventListener('click', () => {
   if (!km || km < 0) { showToast('❌ KM to\'g\'ri kiriting', 'error'); return; }
   curCar.total_km = km;
   allCars = allCars.map(c => c.id === curCar.id ? curCar : c); saveCars();
-  firebaseSaveCar(curCar);
+  fbSaveCar(curCar); // ← Firebase yangilash
   showToast('✅ Probeg yangilandi!', 'success'); openModal(); loadDashboard();
 });
 
@@ -837,24 +781,27 @@ document.getElementById('btn-change-svc').addEventListener('click', () => {
   curCar.history.push({ type, km, oil_name: type === 'oil' ? oilName : null, date: new Date().toISOString() });
   allCars = allCars.map(c => c.id === curCar.id ? curCar : c); saveCars();
 
+  fbSaveCar(curCar);           // ← Firebase mashina yangilash
+  fbSaveServiceLog(curCar, type, km); // ← Firebase xizmat log
+
   if (smsConfig.enabled && smsConfig.devsms_token) {
     const svcLabel = SVC_META[type]?.label || type;
     const tplKey   = type + '_message';
     const tmpl     = smsConfig[tplKey] || DEFAULT_SMS[tplKey] || DEFAULT_SMS.default_change_message;
     const filled   = fillTemplate(tmpl, curCar, type).replace(/{service_label}/g, svcLabel);
     sendSms(filled, curCar.phone_number);
-    smsConfig.sms_sent_count = (smsConfig.sms_sent_count || 0) + 1; saveSms(); firebaseSaveSmsConfig();
+    smsConfig.sms_sent_count = (smsConfig.sms_sent_count || 0) + 1;
+    saveSms(); fbSaveSmsConfig(); // ← SMS count Firebase ga
     showToast('✅ ' + svcLabel + ' · SMS yuborildi!', 'success');
   } else {
     showToast('✅ ' + (SVC_META[type]?.label || 'Xizmat') + ' almashtirildi!', 'success');
   }
-  firebaseSaveServiceChange(curCar, type, km);
   openModal(); loadDashboard();
 });
 
 document.getElementById('btn-delete-car').addEventListener('click', () => {
   if (!confirm('Mashinani o\'chirasizmi?')) return;
-  firebaseDeleteCar(curCar.id);
+  fbDeleteCar(curCar.id); // ← Firebase dan o'chirish
   allCars = allCars.filter(c => c.id !== curCar.id); saveCars();
   document.getElementById('car-modal').classList.remove('active');
   showToast('✅ Mashina o\'chirildi!', 'success'); loadDashboard(); loadCarsGrid();
@@ -898,10 +845,11 @@ function init() {
   document.getElementById('setting-warn').value   = cfg.warn_pct;
   document.getElementById('setting-danger').value = cfg.danger_pct;
   if (!DB.get('oils_init', false)) { saveOils(); DB.set('oils_init', true); }
-  // Avval LocalStorage dan ko'rsatamiz (tez), keyin Firebase dan yangilaymiz
+  // 1) LocalStorage dan tez ko'rsatish
   loadDashboard();
   renderOilSel('oil-name');
-  loadCarsFromFirebase();
+  // 2) Firebase dan yangilash (orqa fonda)
+  loadFromFirebase();
   startAutoCheck();
 }
 init();
