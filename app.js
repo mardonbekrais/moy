@@ -1,13 +1,67 @@
 // ================================================================
-// MOYTRACK PRO v4.1  —  app.js
-// Supabase to'g'ri ulanish · Test · LocalStorage DB
+// MOYTRACK PRO v4.2  —  app.js
+// Firebase Realtime Database · LocalStorage DB
 // ================================================================
 
-// ===== DATABASE =====
+// ===== FIREBASE CONFIG =====
+const FIREBASE_URL = 'https://gilamuz-8308f-default-rtdb.firebaseio.com';
+
+// ===== DATABASE (LocalStorage) =====
 const DB = {
   get(k, d = []) { try { const v = localStorage.getItem('mt_' + k); return v ? JSON.parse(v) : d; } catch { return d; } },
   set(k, v)      { try { localStorage.setItem('mt_' + k, JSON.stringify(v)); } catch(e) { console.warn(e); } },
   nextId(k)      { const id = this.get('_id_' + k, 0) + 1; this.set('_id_' + k, id); return id; }
+};
+
+// ===== FIREBASE API =====
+const FB = {
+  async get(path) {
+    try {
+      const r = await fetch(`${FIREBASE_URL}/${path}.json`);
+      if (!r.ok) return { ok: false, status: r.status, data: null };
+      const data = await r.json();
+      return { ok: true, status: r.status, data };
+    } catch(e) { return { ok: false, status: 0, error: e.message }; }
+  },
+  async post(path, body) {
+    try {
+      const r = await fetch(`${FIREBASE_URL}/${path}.json`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const data = await r.json();
+      return { ok: r.ok, status: r.status, data };
+    } catch(e) { return { ok: false, status: 0, error: e.message }; }
+  },
+  async put(path, body) {
+    try {
+      const r = await fetch(`${FIREBASE_URL}/${path}.json`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const data = await r.json();
+      return { ok: r.ok, status: r.status, data };
+    } catch(e) { return { ok: false, status: 0, error: e.message }; }
+  },
+  async patch(path, body) {
+    try {
+      const r = await fetch(`${FIREBASE_URL}/${path}.json`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const data = await r.json();
+      return { ok: r.ok, status: r.status, data };
+    } catch(e) { return { ok: false, status: 0, error: e.message }; }
+  },
+  async delete(path) {
+    try {
+      const r = await fetch(`${FIREBASE_URL}/${path}.json`, { method: 'DELETE' });
+      return { ok: r.ok, status: r.status };
+    } catch(e) { return { ok: false, status: 0, error: e.message }; }
+  }
 };
 
 // ===== DEFAULT SMS =====
@@ -18,12 +72,6 @@ const DEFAULT_SMS = {
   default_change_message: '{car_name} ({car_number}) — {service_label} almashtirildi\n📅 {date} {time} · 🏁 {km} km',
 };
 
-// ===== SUPABASE SOZLAMALARI =====
-// MUHIM: Supabase dashboard > Settings > API > "anon public" key ni ishlating
-// "sb_publishable_..." kalit REST API uchun ISHLAMAYDI
-const SUPA_URL = 'https://qscvtxtgbwbshkrqklgk.supabase.co';
-const SUPA_KEY = 'sb_publishable_SsWaBdGmEv6RvF33oAv4bw_qTjFC5mY'; // <- bu to'g'ri emas, anon key kerak
-
 // ===== STATE =====
 let allCars = DB.get('cars', []);
 let allOils = DB.get('oils', [
@@ -33,13 +81,9 @@ let allOils = DB.get('oils', [
 ]);
 let smsConfig = DB.get('sms', {
   api_url: '', enabled: false, sms_sent_count: 0, devsms_token: '',
-  supabase_url: SUPA_URL, supabase_key: SUPA_KEY, supabase_enabled: true,
+  firebase_enabled: true,
   ...DEFAULT_SMS
 });
-// Har safar SUPA_URL/KEY ni yangilab qo'yamiz
-smsConfig.supabase_url     = SUPA_URL;
-smsConfig.supabase_key     = SUPA_KEY;
-smsConfig.supabase_enabled = true;
 
 let cfg  = DB.get('cfg', { warn_pct: 80, danger_pct: 100, theme: 'dark' });
 let WPCT = cfg.warn_pct   / 100;
@@ -377,115 +421,36 @@ function startAutoCheck() {
   autoCheckTimer = setInterval(autoCheckAndSend, AUTO_CHECK_INTERVAL);
 }
 
-// ===== SUPABASE =====
-// TO'G'RI ULANISH:
-// 1. https://supabase.com/dashboard/project/qscvtxtgbwbshkrqklgk/settings/api
-// 2. "Project API keys" bo'limidan "anon public" key ni ko'ching (eyJ... bilan boshlanadi)
-// 3. Quyidagi SUPA_KEY ni o'sha key bilan almashtiring
-// 4. Supabase SQL Editor'da quyidagi jadvallarni yarating:
-//
-//   CREATE TABLE IF NOT EXISTS cars (
-//     id BIGSERIAL PRIMARY KEY,
-//     car_name TEXT, car_number TEXT UNIQUE,
-//     phone_number TEXT, total_km INT, oil_name TEXT,
-//     added_at TIMESTAMPTZ DEFAULT NOW()
-//   );
-//   CREATE TABLE IF NOT EXISTS service_logs (
-//     id BIGSERIAL PRIMARY KEY,
-//     car_name TEXT, car_number TEXT,
-//     service_type TEXT, km_at_change INT,
-//     changed_at TIMESTAMPTZ DEFAULT NOW()
-//   );
-//   ALTER TABLE cars ENABLE ROW LEVEL SECURITY;
-//   ALTER TABLE service_logs ENABLE ROW LEVEL SECURITY;
-//   CREATE POLICY "anon full" ON cars FOR ALL USING (true) WITH CHECK (true);
-//   CREATE POLICY "anon full" ON service_logs FOR ALL USING (true) WITH CHECK (true);
+// ===== FIREBASE FUNCTIONS =====
 
-async function supabaseReq(path, method, body, overrideUrl, overrideKey) {
-  const url = overrideUrl || smsConfig.supabase_url || SUPA_URL;
-  const key = overrideKey || smsConfig.supabase_key || SUPA_KEY;
-  if (!url || !key) return { ok: false, status: 0, error: 'URL yoki Key yo\'q' };
-  try {
-    const headers = {
-      'Content-Type':  'application/json',
-      'apikey':        key,
-      'Authorization': 'Bearer ' + key,
-    };
-    if (method !== 'GET') headers['Prefer'] = 'return=minimal';
+// Firebase ulanishini tekshirish
+async function testFirebase() {
+  const btn = document.getElementById('btn-test-firebase');
+  const res = document.getElementById('firebase-test-result');
 
-    const r = await fetch(url.replace(/\/$/, '') + '/rest/v1/' + path, {
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined
-    });
-    let responseBody = null;
-    try { responseBody = await r.json(); } catch(e) {}
-    return { ok: r.ok, status: r.status, body: responseBody };
-  } catch(e) {
-    return { ok: false, status: 0, error: e.message || 'Tarmoq xatosi (CORS yoki URL noto\'g\'ri)' };
-  }
-}
-
-// ── ULANISHNI TEKSHIRISH ──
-async function testSupabase() {
-  const url = document.getElementById('supabase-url').value.trim();
-  const key = document.getElementById('supabase-key').value.trim();
-  const btn = document.getElementById('btn-test-supabase');
-  const res = document.getElementById('supabase-test-result');
-
-  if (!url || !key) {
-    res.style.display = 'block';
-    res.className     = 'supa-result fail';
-    res.innerHTML     = '❌ URL va Key ni kiriting';
-    return;
-  }
-
-  // Loading holati
   btn.disabled  = true;
   btn.className = 'btn-test-supa loading';
   btn.innerHTML = '<span class="spin">⏳</span> Tekshirilmoqda...';
   res.style.display = 'block';
   res.className = 'supa-result loading';
-  res.innerHTML = '⏳ Supabase ga ulanmoqda...';
+  res.innerHTML = '⏳ Firebase ga ulanmoqda...';
 
-  // /rest/v1/ ga GET — Supabase har doim javob beradi agar URL va key to'g'ri bo'lsa
-  const result = await supabaseReq('', 'GET', null, url, key);
-  const proj   = url.replace('https://', '').split('.')[0];
+  const result = await FB.get('_ping');
 
-  if (result.error && result.status === 0) {
-    // Tarmoq xatosi — CORS yoki URL butunlay noto'g'ri
+  if (result.status === 0) {
     btn.className = 'btn-test-supa fail';
-    btn.innerHTML = '❌ Link xato';
+    btn.innerHTML = '❌ Ulanmadi';
     res.className = 'supa-result fail';
-    res.innerHTML = `❌ <strong>Link xato!</strong> Serverga ulanib bo'lmadi.<br>
-      <span style="font-size:12px">Sabab: ${result.error}</span><br>
-      <span style="font-size:11px;opacity:.7">URL: ${url}</span>`;
-  } else if (result.status === 401 || result.status === 403) {
-    // URL to'g'ri lekin Key noto'g'ri
-    btn.className = 'btn-test-supa fail';
-    btn.innerHTML = '❌ Key xato';
-    res.className = 'supa-result fail';
-    res.innerHTML = `❌ <strong>API Key noto'g'ri!</strong><br>
-      <span style="font-size:12px">Supabase dashboard → Settings → API → <strong>"anon public"</strong> key ni ishlating.<br>
-      "sb_publishable_..." kalit ishlamaydi — "eyJ..." bilan boshlanadigan keyni oling.</span>`;
-  } else if (result.status >= 200 && result.status < 500) {
-    // Har qanday 2xx/3xx/4xx — server javob berdi = ulanish ishlayapti
-    btn.className = 'btn-test-supa ok';
-    btn.innerHTML = '✅ Done — Ulanish ishlayapti';
-    res.className = 'supa-result ok';
-    res.innerHTML = `✅ <strong>Done!</strong> Supabase ulanish muvaffaqiyatli.<br>
-      <span style="font-size:12px">Loyiha: <strong>${proj}</strong> · Status: ${result.status}</span>`;
-    // Sozlamalarni saqlash
-    smsConfig.supabase_url     = url;
-    smsConfig.supabase_key     = key;
-    smsConfig.supabase_enabled = true;
-    saveSms();
+    res.innerHTML = `❌ <strong>Firebase ga ulanib bo'lmadi!</strong><br>
+      <span style="font-size:12px">Sabab: ${result.error || 'Tarmoq xatosi'}</span>`;
   } else {
-    btn.className = 'btn-test-supa fail';
-    btn.innerHTML = '❌ Link xato';
-    res.className = 'supa-result fail';
-    res.innerHTML = `❌ <strong>Link xato!</strong> Javob: HTTP ${result.status}<br>
-      <span style="font-size:11px;opacity:.7">URL: ${url}</span>`;
+    btn.className = 'btn-test-supa ok';
+    btn.innerHTML = '✅ Ulanish ishlayapti';
+    res.className = 'supa-result ok';
+    res.innerHTML = `✅ <strong>Firebase ulanish muvaffaqiyatli!</strong><br>
+      <span style="font-size:12px">URL: ${FIREBASE_URL}</span>`;
+    smsConfig.firebase_enabled = true;
+    saveSms();
   }
 
   btn.disabled = false;
@@ -496,27 +461,44 @@ async function testSupabase() {
   }, 10000);
 }
 
-// ── MA'LUMOT SAQLASH ──
-async function supabaseSaveCar(car) {
-  if (!smsConfig.supabase_enabled) return;
-  const r = await supabaseReq('cars', 'POST', {
-    car_name: car.car_name, car_number: car.car_number,
-    phone_number: car.phone_number, total_km: car.total_km,
-    oil_name: car.oil_name, added_at: car.added_at
-  });
-  if (r.ok) console.log('✅ Supabase: mashina saqlandi');
-  else      console.warn('⚠️ Supabase cars xato:', r.status, r.body);
+// Mashina saqlash Firebase ga
+async function firebaseSaveCar(car) {
+  if (!smsConfig.firebase_enabled) return;
+  const data = {
+    car_name:    car.car_name,
+    car_number:  car.car_number,
+    phone_number: car.phone_number,
+    total_km:    car.total_km,
+    oil_name:    car.oil_name,
+    added_at:    car.added_at
+  };
+  const r = await FB.put(`cars/${car.id}`, data);
+  if (r.ok) console.log('✅ Firebase: mashina saqlandi');
+  else      console.warn('⚠️ Firebase cars xato:', r.status, r.error);
 }
 
-async function supabaseSaveServiceChange(car, type, km) {
-  if (!smsConfig.supabase_enabled) return;
-  const r = await supabaseReq('service_logs', 'POST', {
-    car_name: car.car_name, car_number: car.car_number,
-    service_type: type, km_at_change: km,
-    changed_at: new Date().toISOString()
-  });
-  if (r.ok) console.log('✅ Supabase: xizmat saqlandi');
-  else      console.warn('⚠️ Supabase service_logs xato:', r.status, r.body);
+// Xizmat o'zgarishini saqlash Firebase ga
+async function firebaseSaveServiceChange(car, type, km) {
+  if (!smsConfig.firebase_enabled) return;
+  const logId = Date.now();
+  const data = {
+    car_name:    car.car_name,
+    car_number:  car.car_number,
+    service_type: type,
+    km_at_change: km,
+    changed_at:  new Date().toISOString()
+  };
+  const r = await FB.put(`service_logs/${logId}`, data);
+  if (r.ok) console.log('✅ Firebase: xizmat saqlandi');
+  else      console.warn('⚠️ Firebase service_logs xato:', r.status, r.error);
+}
+
+// Mashina o'chirish Firebase dan
+async function firebaseDeleteCar(carId) {
+  if (!smsConfig.firebase_enabled) return;
+  const r = await FB.delete(`cars/${carId}`);
+  if (r.ok) console.log('✅ Firebase: mashina o\'chirildi');
+  else      console.warn('⚠️ Firebase delete xato:', r.status);
 }
 
 // ===== ADD CAR =====
@@ -563,7 +545,7 @@ document.getElementById('add-car-form').addEventListener('submit', e => {
 
   allCars.push(car);
   saveCars();
-  supabaseSaveCar(car);
+  firebaseSaveCar(car);
 
   if (smsConfig.enabled && smsConfig.devsms_token && car.phone_number) {
     const smsText = buildSaveSmsText(car, checkedKeys);
@@ -606,9 +588,8 @@ function deleteOil(id) {
 function loadSmsPage() {
   document.getElementById('devsms-token').value        = smsConfig.devsms_token  || '';
   document.getElementById('sms-enabled').checked       = !!smsConfig.enabled;
-  document.getElementById('supabase-url').value        = smsConfig.supabase_url  || SUPA_URL;
-  document.getElementById('supabase-key').value        = smsConfig.supabase_key  || SUPA_KEY;
-  document.getElementById('supabase-enabled').checked  = true;
+  document.getElementById('firebase-url-display').textContent = FIREBASE_URL;
+  document.getElementById('firebase-enabled').checked  = !!smsConfig.firebase_enabled;
   document.getElementById('sms-save-message').value    = smsConfig.save_message    || DEFAULT_SMS.save_message;
   document.getElementById('sms-oil-message').value     = smsConfig.oil_message     || DEFAULT_SMS.oil_message;
   document.getElementById('sms-gearbox-message').value = smsConfig.gearbox_message || DEFAULT_SMS.gearbox_message;
@@ -628,9 +609,7 @@ document.getElementById('sms-config-form').addEventListener('submit', e => {
   e.preventDefault();
   smsConfig.devsms_token      = document.getElementById('devsms-token').value.trim();
   smsConfig.enabled           = document.getElementById('sms-enabled').checked;
-  smsConfig.supabase_url      = document.getElementById('supabase-url').value || SUPA_URL;
-  smsConfig.supabase_key      = document.getElementById('supabase-key').value || SUPA_KEY;
-  smsConfig.supabase_enabled  = true;
+  smsConfig.firebase_enabled  = document.getElementById('firebase-enabled').checked;
   smsConfig.save_message      = document.getElementById('sms-save-message').value;
   smsConfig.oil_message       = document.getElementById('sms-oil-message').value;
   smsConfig.gearbox_message   = document.getElementById('sms-gearbox-message').value;
@@ -728,6 +707,7 @@ document.getElementById('btn-update-km').addEventListener('click', () => {
   if (!km || km < 0) { showToast('❌ KM to\'g\'ri kiriting', 'error'); return; }
   curCar.total_km = km;
   allCars = allCars.map(c => c.id === curCar.id ? curCar : c); saveCars();
+  firebaseSaveCar(curCar);
   showToast('✅ Probeg yangilandi!', 'success'); openModal(); loadDashboard();
 });
 
@@ -757,12 +737,13 @@ document.getElementById('btn-change-svc').addEventListener('click', () => {
   } else {
     showToast('✅ ' + (SVC_META[type]?.label || 'Xizmat') + ' almashtirildi!', 'success');
   }
-  supabaseSaveServiceChange(curCar, type, km);
+  firebaseSaveServiceChange(curCar, type, km);
   openModal(); loadDashboard();
 });
 
 document.getElementById('btn-delete-car').addEventListener('click', () => {
   if (!confirm('Mashinani o\'chirasizmi?')) return;
+  firebaseDeleteCar(curCar.id);
   allCars = allCars.filter(c => c.id !== curCar.id); saveCars();
   document.getElementById('car-modal').classList.remove('active');
   showToast('✅ Mashina o\'chirildi!', 'success'); loadDashboard(); loadCarsGrid();

@@ -265,28 +265,18 @@
               <button type="submit" class="bsub" style="margin-top:12px">✅ Saqlash va Ishga Tushurish</button>
             </div>
             <div class="fc">
-              <div class="fct">🗄️ Supabase Ulanish</div>
-              <!-- MUHIM: "anon public" key kerak — Supabase dashboard > Settings > API -->
-              <div style="background:var(--wbg);border:1.5px solid var(--wbr);border-radius:var(--rs);padding:10px 12px;margin-bottom:12px;font-size:12px;color:var(--warning);line-height:1.6">
-                ⚠️ <strong>Diqqat:</strong> REST API uchun <strong>anon public</strong> key kerak.<br>
-                Supabase Dashboard → Settings → API → <em>"anon public"</em> kalitni oling (<code>eyJ...</code> bilan boshlanadi).<br>
-                <strong>Jadvallarni ham yaratish kerak</strong> — SQL Editor'da yuqoridagi kommentdan nusxa oling.
+              <div class="fct">🔥 Firebase Ulanish</div>
+              <div style="background:var(--sbg);border:1.5px solid var(--sbr);border-radius:var(--rs);padding:10px 12px;margin-bottom:12px;font-size:12px;color:var(--success);line-height:1.6">
+                ✅ <strong>Firebase ulangan!</strong> Ma'lumotlar avtomatik saqlanadi.<br>
+                <span style="color:var(--text2)">URL: <code id="firebase-url-display" style="color:var(--accent);font-size:11px">https://gilamuz-8308f-default-rtdb.firebaseio.com</code></span>
               </div>
-              <div class="fg">
-                <label>Supabase URL</label>
-                <input type="url" id="supabase-url" placeholder="https://xxxx.supabase.co">
-              </div>
-              <div class="fg">
-                <label>Supabase Anon Key <span style="font-weight:400;text-transform:none;font-size:10px">(eyJ... bilan boshlanadi)</span></label>
-                <input type="text" id="supabase-key" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." autocomplete="off">
-              </div>
-              <button type="button" class="btn-test-supa" id="btn-test-supabase" onclick="testSupabase()">
+              <button type="button" class="btn-test-supa" id="btn-test-firebase" onclick="testFirebase()">
                 🔗 Ulanishni Tekshirish
               </button>
-              <div id="supabase-test-result" class="supa-result" style="display:none"></div>
+              <div id="firebase-test-result" class="supa-result" style="display:none"></div>
               <div class="tr" style="margin-top:12px">
-                <label class="tl">Supabaza yoqish</label>
-                <label class="tg"><input type="checkbox" id="supabase-enabled" checked><span class="ts"></span></label>
+                <label class="tl">Firebase yoqish</label>
+                <label class="tg"><input type="checkbox" id="firebase-enabled" checked><span class="ts"></span></label>
               </div>
             </div>
             <div class="fc">
@@ -351,7 +341,7 @@
           <div class="srow click" onclick="exportData()"><span>📤 Eksport (JSON)</span><span>›</span></div>
           <div class="srow click dr" onclick="confirmClear()"><span>🗑️ Barcha ma'lumotlarni o'chirish</span><span>›</span></div>
         </div>
-        <div class="ver">MoyTrack v4.0 Pro · LocalDB 💾</div>
+        <div class="ver">MoyTrack v4.2 Pro · Firebase 🔥</div>
       </div>
     </div>
   </div>
