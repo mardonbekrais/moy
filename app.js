@@ -100,7 +100,10 @@ async function loadCarsFromFirebase() {
   try {
     const r = await FB.get('cars');
     if (r.ok && r.data && typeof r.data === 'object') {
-      const fbCars = Object.values(r.data).filter(Boolean);
+      const fbCars = Object.values(r.data).filter(Boolean).map(car => ({
+        ...car,
+        id: Number(car.id) || car.id  // id ni to'g'ri saqlash
+      }));
       if (fbCars.length > 0) {
         allCars = fbCars;
         saveCars();
@@ -108,6 +111,7 @@ async function loadCarsFromFirebase() {
     }
   } catch(e) { console.warn('Firebase yuklanmadi, LocalStorage ishlatilmoqda'); }
   loadDashboard();
+  loadCarsGrid();
   renderOilSel('oil-name');
 }
 
@@ -223,7 +227,12 @@ function ciHTML(car) {
 
 function addCIE(el) {
   el.querySelectorAll('.ci').forEach(e => {
-    e.addEventListener('click', () => { curCar = allCars.find(c => c.id == e.dataset.id); openModal(); });
+    e.addEventListener('click', () => {
+      const id = e.dataset.id;
+      curCar = allCars.find(c => String(c.id) === String(id));
+      if (curCar) openModal();
+      else console.warn('Mashina topilmadi, id:', id);
+    });
   });
 }
 
@@ -257,7 +266,12 @@ function loadCarsGrid(q = '') {
     </div>`;
   }).join('');
   grid.querySelectorAll('.cc').forEach(e => {
-    e.addEventListener('click', () => { curCar = allCars.find(c => c.id == e.dataset.id); openModal(); });
+    e.addEventListener('click', () => {
+      const id = e.dataset.id;
+      curCar = allCars.find(c => String(c.id) === String(id));
+      if (curCar) openModal();
+      else console.warn('Mashina topilmadi, id:', id);
+    });
   });
 }
 function filterGrid() { loadCarsGrid(document.getElementById('car-search').value.toLowerCase().trim()); }
@@ -484,26 +498,26 @@ async function firebaseSaveCar(car) {
     id:           car.id,
     car_name:     car.car_name,
     car_number:   car.car_number,
-    phone_number: car.phone_number,
+    phone_number: car.phone_number || '',
     total_km:     car.total_km,
     oil_name:     car.oil_name,
-    daily_km:     car.daily_km,
+    daily_km:     car.daily_km || 50,
     oil_change_km:         car.oil_change_km,
     antifreeze_km:         car.antifreeze_km,
-    antifreeze_interval:   car.antifreeze_interval,
+    antifreeze_interval:   car.antifreeze_interval || 30000,
     gearbox_km:            car.gearbox_km,
-    gearbox_interval:      car.gearbox_interval,
-    air_filter_km:         car.air_filter_km,
-    air_filter_interval:   car.air_filter_interval,
-    cabin_filter_km:       car.cabin_filter_km,
-    cabin_filter_interval: car.cabin_filter_interval,
-    oil_filter_km:         car.oil_filter_km,
-    oil_filter_interval:   car.oil_filter_interval,
+    gearbox_interval:      car.gearbox_interval || 50000,
+    air_filter_km:         car.air_filter_km || car.total_km,
+    air_filter_interval:   car.air_filter_interval || 15000,
+    cabin_filter_km:       car.cabin_filter_km || car.total_km,
+    cabin_filter_interval: car.cabin_filter_interval || 15000,
+    oil_filter_km:         car.oil_filter_km || car.total_km,
+    oil_filter_interval:   car.oil_filter_interval || 10000,
     history:      car.history || [],
     added_at:     car.added_at
   };
   const r = await FB.put(`cars/car_${car.id}`, data);
-  if (r.ok) console.log('✅ Firebase: mashina saqlandi');
+  if (r.ok) console.log('✅ Firebase: mashina saqlandi', car.id);
   else      console.warn('⚠️ Firebase cars xato:', r.status, r.error);
 }
 
