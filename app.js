@@ -425,30 +425,77 @@ function startAutoCheck() {
 }
 
 // ===== SUPABASE =====
-async function supabaseReq(path, method, body) {
-  const url = smsConfig.supabase_url;
-  const key = smsConfig.supabase_key;
-  if (!smsConfig.supabase_enabled || !url || !key) return null;
+
+// Asosiy so'rov
+async function supabaseReq(path, method, body, customUrl, customKey) {
+  const url = customUrl || smsConfig.supabase_url;
+  const key = customKey || smsConfig.supabase_key;
+  if (!url || !key) return { ok: false, error: 'URL yoki Key kiritilmagan' };
   try {
     const r = await fetch(url.replace(/\/$/, '') + '/rest/v1/' + path, {
       method,
       headers: {
-        'Content-Type': 'application/json',
-        'apikey': key,
+        'Content-Type':  'application/json',
+        'apikey':        key,
         'Authorization': 'Bearer ' + key,
-        'Prefer': 'return=minimal'
+        'Prefer':        'return=minimal'
       },
       body: body ? JSON.stringify(body) : undefined
     });
-    return r.ok ? r : null;
+    return { ok: r.ok, status: r.status };
   } catch(e) {
-    console.warn('Supabase xatosi:', e);
-    return null;
+    return { ok: false, error: e.message || 'Tarmoq xatosi' };
   }
 }
 
+// ULANISHNI TEKSHIRISH — test tugmasi
+async function testSupabase() {
+  const url = document.getElementById('supabase-url').value.trim();
+  const key = document.getElementById('supabase-key').value.trim();
+  const btn = document.getElementById('btn-test-supabase');
+  const res = document.getElementById('supabase-test-result');
+
+  if (!url || !key) {
+    res.style.display = 'block';
+    res.className     = 'supa-result fail';
+    res.innerHTML     = '❌ Avval URL va Key ni kiriting';
+    return;
+  }
+
+  // Loading
+  btn.className = 'btn-test-supa loading';
+  btn.innerHTML = '<span class="spin">⏳</span> Tekshirilmoqda...';
+  res.style.display = 'block';
+  res.className = 'supa-result loading';
+  res.innerHTML = '⏳ Supabase ga ulanmoqda...';
+
+  // GET so'rov — javob kelsа ulanish bor
+  const result = await supabaseReq('', 'GET', null, url, key);
+  const shortUrl = url.replace('https://', '').split('.')[0];
+
+  if (result.ok || result.status === 200 || result.status === 400 || result.status === 404 || result.status === 406) {
+    btn.className = 'btn-test-supa ok';
+    btn.innerHTML = '✅ Done — Ulanish muvaffaqiyatli';
+    res.className = 'supa-result ok';
+    res.innerHTML = `✅ <strong>Done!</strong> Supabase ulanish ishlayapti.<br><span style="font-size:11px;opacity:.75">Loyiha: ${shortUrl}.supabase.co · Status: ${result.status}</span>`;
+  } else {
+    btn.className = 'btn-test-supa fail';
+    btn.innerHTML = '❌ Link xato — Ulanib bo\'lmadi';
+    res.className = 'supa-result fail';
+    const errText = result.error || `HTTP ${result.status}`;
+    res.innerHTML = `❌ <strong>Link xato!</strong> Supabase ga ulanib bo'lmadi.<br><span style="font-size:11px;opacity:.85">${errText}</span><br><span style="font-size:11px;opacity:.65">URL: ${url}</span>`;
+  }
+
+  setTimeout(() => {
+    btn.className = 'btn-test-supa';
+    btn.innerHTML = '🔗 Ulanishni Tekshirish';
+  }, 7000);
+}
+
+// MA'LUMOT SAQLASH
 async function supabaseSaveCar(car) {
-  await supabaseReq('cars?on_conflict=car_number', 'POST', {
+  if (!smsConfig.supabase_enabled) return;
+  const r = await supabaseReq('cars', 'POST', {
     car_name: car.car_name,
     car_number: car.car_number,
     phone_number: car.phone_number,
@@ -456,16 +503,21 @@ async function supabaseSaveCar(car) {
     oil_name: car.oil_name,
     added_at: car.added_at
   });
+  if (r && r.ok) console.log('✅ Supabase: mashina saqlandi');
+  else           console.warn('⚠️ Supabase saqlashda xato:', r);
 }
 
 async function supabaseSaveServiceChange(car, type, km) {
-  await supabaseReq('service_logs', 'POST', {
+  if (!smsConfig.supabase_enabled) return;
+  const r = await supabaseReq('service_logs', 'POST', {
     car_name: car.car_name,
     car_number: car.car_number,
     service_type: type,
     km_at_change: km,
     changed_at: new Date().toISOString()
   });
+  if (r && r.ok) console.log('✅ Supabase: xizmat saqlandi');
+  else           console.warn('⚠️ Supabase xizmat saqlanmadi:', r);
 }
 
 // ===== ADD CAR SUBMIT =====

@@ -258,6 +258,31 @@ body{font-family:'DM Sans',-apple-system,sans-serif;background:var(--bg);color:v
 .empty{text-align:center;padding:38px 20px;color:var(--text3)}
 .empty .ei{font-size:40px;margin-bottom:12px}.empty p{font-size:13px}
 
+/* ===== SUPABASE TEST BUTTON ===== */
+.btn-test-supa{
+  width:100%;padding:12px;margin-top:12px;
+  background:var(--bg3);border:1.5px solid var(--border2);
+  border-radius:var(--rs);color:var(--text2);
+  font-size:14px;font-weight:600;font-family:'DM Sans',sans-serif;
+  cursor:pointer;transition:all .2s;display:flex;align-items:center;justify-content:center;gap:8px;
+}
+.btn-test-supa:active{transform:scale(.97)}
+.btn-test-supa.loading{opacity:.7;pointer-events:none}
+.btn-test-supa.ok{background:var(--sbg);border-color:var(--sbr);color:var(--success)}
+.btn-test-supa.fail{background:var(--dbg);border-color:var(--dbr);color:var(--danger)}
+
+.supa-result{
+  margin-top:10px;padding:11px 14px;border-radius:var(--rs);
+  font-size:13px;font-weight:600;line-height:1.5;
+}
+.supa-result.ok{background:var(--sbg);border:1.5px solid var(--sbr);color:var(--success)}
+.supa-result.fail{background:var(--dbg);border:1.5px solid var(--dbr);color:var(--danger)}
+.supa-result.loading{background:var(--bg3);border:1.5px solid var(--border2);color:var(--text2)}
+
+/* spin animation */
+@keyframes spin{to{transform:rotate(360deg)}}
+.spin{display:inline-block;animation:spin .8s linear infinite}
+
 /* ===== RESPONSIVE ===== */
 @media(max-width:360px){.hgrid{grid-template-columns:1fr 1fr}.cg{grid-template-columns:1fr}.sn{font-size:19px}}
 @media(min-width:600px){
