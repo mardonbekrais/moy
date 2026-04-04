@@ -267,8 +267,14 @@
             <div class="fc">
               <div class="fct">🗄️ Supabase Ulanish</div>
               <p style="font-size:12px;color:var(--text2);margin-bottom:10px">Mashina va xizmat ma'lumotlarini Supabase bazasiga saqlash uchun</p>
-              <div class="fg"><label>Supabase URL</label><input type="url" id="supabase-url" placeholder="https://xxxx.supabase.co"></div>
-              <div class="fg"><label>Supabase Anon Key</label><input type="text" id="supabase-key" placeholder="eyJhbGciOiJIUzI1NiIs..." autocomplete="off"></div>
+              <div class="fg">
+                <label>Supabase URL</label>
+                <input type="url" id="supabase-url" value="https://qscvtxtgbwbshkrqklgk.supabase.co" readonly style="opacity:.7;cursor:default">
+              </div>
+              <div class="fg">
+                <label>Supabase Anon Key</label>
+                <input type="text" id="supabase-key" value="sb_publishable_SsWaBdGmEv6RvF33oAv4bw_qTjFC5mY" readonly autocomplete="off" style="opacity:.7;cursor:default;font-size:11px">
+              </div>
               <!-- Test tugmasi va natija -->
               <button type="button" class="btn-test-supa" id="btn-test-supabase" onclick="testSupabase()">
                 🔗 Ulanishni Tekshirish
@@ -276,7 +282,7 @@
               <div id="supabase-test-result" class="supa-result" style="display:none"></div>
               <div class="tr" style="margin-top:12px">
                 <label class="tl">Supabaza yoqish</label>
-                <label class="tg"><input type="checkbox" id="supabase-enabled"><span class="ts"></span></label>
+                <label class="tg"><input type="checkbox" id="supabase-enabled" checked><span class="ts"></span></label>
               </div>
             </div>
             <div class="fc">

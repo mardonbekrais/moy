@@ -26,7 +26,15 @@ let allOils   = DB.get('oils', [
   { id: 2, name: 'SAE 5W-40',  interval: 7000  },
   { id: 3, name: 'SAE 10W-40', interval: 8000  }
 ]);
-let smsConfig = DB.get('sms', { api_url: '', enabled: false, sms_sent_count: 0, devsms_token: '', supabase_url: '', supabase_key: '', supabase_enabled: false, ...DEFAULT_SMS });
+// ===== SUPABASE CREDENTIALS =====
+const SUPA_URL = 'https://qscvtxtgbwbshkrqklgk.supabase.co';
+const SUPA_KEY = 'sb_publishable_SsWaBdGmEv6RvF33oAv4bw_qTjFC5mY';
+
+let smsConfig = DB.get('sms', { api_url: '', enabled: false, sms_sent_count: 0, devsms_token: '', supabase_url: SUPA_URL, supabase_key: SUPA_KEY, supabase_enabled: true, ...DEFAULT_SMS });
+// Agar eski saqlangan config bo'lsa, URL va Key ni yangilash
+if (!smsConfig.supabase_url) smsConfig.supabase_url = SUPA_URL;
+if (!smsConfig.supabase_key) smsConfig.supabase_key = SUPA_KEY;
+smsConfig.supabase_enabled = true;
 let cfg       = DB.get('cfg', { warn_pct: 80, danger_pct: 100, theme: 'dark' });
 let WPCT      = cfg.warn_pct   / 100;
 let DPCT      = cfg.danger_pct / 100;
@@ -428,8 +436,8 @@ function startAutoCheck() {
 
 // Asosiy so'rov
 async function supabaseReq(path, method, body, customUrl, customKey) {
-  const url = customUrl || smsConfig.supabase_url;
-  const key = customKey || smsConfig.supabase_key;
+  const url = customUrl || smsConfig.supabase_url || SUPA_URL;
+  const key = customKey || smsConfig.supabase_key || SUPA_KEY;
   if (!url || !key) return { ok: false, error: 'URL yoki Key kiritilmagan' };
   try {
     const r = await fetch(url.replace(/\/$/, '') + '/rest/v1/' + path, {
@@ -614,9 +622,9 @@ function deleteOil(id) {
 function loadSmsPage() {
   document.getElementById('devsms-token').value     = smsConfig.devsms_token  || '';
   document.getElementById('sms-enabled').checked    = !!smsConfig.enabled;
-  document.getElementById('supabase-url').value     = smsConfig.supabase_url  || '';
-  document.getElementById('supabase-key').value     = smsConfig.supabase_key  || '';
-  document.getElementById('supabase-enabled').checked = !!smsConfig.supabase_enabled;
+  document.getElementById('supabase-url').value      = smsConfig.supabase_url || SUPA_URL;
+  document.getElementById('supabase-key').value      = smsConfig.supabase_key || SUPA_KEY;
+  document.getElementById('supabase-enabled').checked = true;
   document.getElementById('sms-save-message').value = smsConfig.save_message || DEFAULT_SMS.save_message;
   document.getElementById('sms-oil-message').value  = smsConfig.oil_message  || DEFAULT_SMS.oil_message;
   document.getElementById('sms-gearbox-message').value = smsConfig.gearbox_message || DEFAULT_SMS.gearbox_message;
@@ -633,9 +641,9 @@ document.getElementById('sms-config-form').addEventListener('submit', e => {
   e.preventDefault();
   smsConfig.devsms_token      = document.getElementById('devsms-token').value.trim();
   smsConfig.enabled           = document.getElementById('sms-enabled').checked;
-  smsConfig.supabase_url      = document.getElementById('supabase-url').value;
-  smsConfig.supabase_key      = document.getElementById('supabase-key').value;
-  smsConfig.supabase_enabled  = document.getElementById('supabase-enabled').checked;
+  smsConfig.supabase_url     = document.getElementById('supabase-url').value || SUPA_URL;
+  smsConfig.supabase_key     = document.getElementById('supabase-key').value || SUPA_KEY;
+  smsConfig.supabase_enabled = true;
   smsConfig.save_message      = document.getElementById('sms-save-message').value;
   smsConfig.oil_message       = document.getElementById('sms-oil-message').value;
   smsConfig.gearbox_message   = document.getElementById('sms-gearbox-message').value;
