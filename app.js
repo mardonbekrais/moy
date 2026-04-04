@@ -102,14 +102,37 @@ async function loadCarsFromFirebase() {
     if (r.ok && r.data && typeof r.data === 'object') {
       const fbCars = Object.values(r.data).filter(Boolean).map(car => ({
         ...car,
-        id: Number(car.id) || car.id  // id ni to'g'ri saqlash
+        id: Number(car.id) || car.id
       }));
       if (fbCars.length > 0) {
         allCars = fbCars;
         saveCars();
       }
     }
-  } catch(e) { console.warn('Firebase yuklanmadi, LocalStorage ishlatilmoqda'); }
+  } catch(e) { console.warn('Firebase cars yuklanmadi:', e); }
+
+  try {
+    const r = await FB.get('oils');
+    if (r.ok && r.data && typeof r.data === 'object') {
+      const fbOils = Object.values(r.data).filter(Boolean).map(o => ({
+        ...o,
+        id: Number(o.id) || o.id
+      }));
+      if (fbOils.length > 0) {
+        allOils = fbOils;
+        saveOils();
+      }
+    }
+  } catch(e) { console.warn('Firebase oils yuklanmadi:', e); }
+
+  try {
+    const r = await FB.get('sms_config');
+    if (r.ok && r.data && typeof r.data === 'object') {
+      smsConfig = { ...smsConfig, ...r.data };
+      saveSms();
+    }
+  } catch(e) { console.warn('Firebase sms_config yuklanmadi:', e); }
+
   loadDashboard();
   loadCarsGrid();
   renderOilSel('oil-name');
@@ -596,6 +619,7 @@ document.getElementById('add-car-form').addEventListener('submit', e => {
     sendSms(smsText, car.phone_number);
     smsConfig.sms_sent_count = (smsConfig.sms_sent_count || 0) + 1;
     saveSms();
+    firebaseSaveSmsConfig();
     showToast('✅ Saqlandi · SMS yuborildi!', 'success');
   } else {
     showToast('✅ Mashina qo\'shildi!', 'success');
@@ -603,6 +627,37 @@ document.getElementById('add-car-form').addEventListener('submit', e => {
   resetAddCarForm();
   navigateTo('cars');
 });
+
+// ===== FIREBASE SMS CONFIG =====
+async function firebaseSaveSmsConfig() {
+  if (!smsConfig.firebase_enabled) return;
+  const r = await FB.put('sms_config', {
+    devsms_token:      smsConfig.devsms_token      || '',
+    enabled:           smsConfig.enabled            || false,
+    sms_sent_count:    smsConfig.sms_sent_count     || 0,
+    firebase_enabled:  smsConfig.firebase_enabled   || true,
+    save_message:      smsConfig.save_message       || DEFAULT_SMS.save_message,
+    oil_message:       smsConfig.oil_message        || DEFAULT_SMS.oil_message,
+    gearbox_message:   smsConfig.gearbox_message    || DEFAULT_SMS.gearbox_message,
+    default_change_message: smsConfig.default_change_message || DEFAULT_SMS.default_change_message,
+  });
+  if (r.ok) console.log('✅ Firebase: SMS config saqlandi');
+  else      console.warn('⚠️ Firebase sms_config xato:', r.status);
+}
+
+// ===== FIREBASE OILS =====
+async function firebaseSaveOil(oil) {
+  if (!smsConfig.firebase_enabled) return;
+  const r = await FB.put(`oils/oil_${oil.id}`, { id: oil.id, name: oil.name, interval: oil.interval });
+  if (r.ok) console.log('✅ Firebase: moy saqlandi');
+  else      console.warn('⚠️ Firebase oils xato:', r.status);
+}
+async function firebaseDeleteOil(oilId) {
+  if (!smsConfig.firebase_enabled) return;
+  const r = await FB.delete(`oils/oil_${oilId}`);
+  if (r.ok) console.log('✅ Firebase: moy o\'chirildi');
+  else      console.warn('⚠️ Firebase oils delete xato:', r.status);
+}
 
 // ===== OILS PAGE =====
 function loadOilsPage() {
@@ -616,16 +671,23 @@ document.getElementById('add-oil-form').addEventListener('submit', e => {
   const name = document.getElementById('oil-name-input').value.trim();
   const interval = parseInt(document.getElementById('oil-interval-input').value);
   if (!name || !interval) { showToast('❌ To\'ldiring', 'error'); return; }
-  allOils.push({ id: DB.nextId('oil'), name, interval });
+  const oil = { id: DB.nextId('oil'), name, interval };
+  allOils.push(oil);
   saveOils();
+  firebaseSaveOil(oil);
   showToast('✅ Moy turi qo\'shildi!', 'success');
   document.getElementById('add-oil-form').reset();
   loadOilsPage();
+  renderOilSel('oil-name');
 });
 function deleteOil(id) {
   if (!confirm('Moy turini o\'chirasizmi?')) return;
-  allOils = allOils.filter(o => o.id !== id); saveOils();
-  showToast('✅ O\'chirildi!', 'success'); loadOilsPage();
+  allOils = allOils.filter(o => o.id !== id);
+  saveOils();
+  firebaseDeleteOil(id);
+  showToast('✅ O\'chirildi!', 'success');
+  loadOilsPage();
+  renderOilSel('oil-name');
 }
 
 // ===== SMS PAGE =====
@@ -658,13 +720,18 @@ document.getElementById('sms-config-form').addEventListener('submit', e => {
   smsConfig.oil_message       = document.getElementById('sms-oil-message').value;
   smsConfig.gearbox_message   = document.getElementById('sms-gearbox-message').value;
   saveSms();
+  firebaseSaveSmsConfig();
   startAutoCheck();
   showToast('✅ SMS sozlamalari saqlandi!', 'success');
   loadSmsPage();
 });
 function resetSmsCount() {
   if (!confirm('Hisoblagichni nolga tiklaysizmi?')) return;
-  smsConfig.sms_sent_count = 0; saveSms(); showToast('✅ Tiklandi', 'success'); loadSmsPage();
+  smsConfig.sms_sent_count = 0;
+  saveSms();
+  firebaseSaveSmsConfig();
+  showToast('✅ Tiklandi', 'success');
+  loadSmsPage();
 }
 
 // ===== CAR MODAL =====
@@ -776,7 +843,7 @@ document.getElementById('btn-change-svc').addEventListener('click', () => {
     const tmpl     = smsConfig[tplKey] || DEFAULT_SMS[tplKey] || DEFAULT_SMS.default_change_message;
     const filled   = fillTemplate(tmpl, curCar, type).replace(/{service_label}/g, svcLabel);
     sendSms(filled, curCar.phone_number);
-    smsConfig.sms_sent_count = (smsConfig.sms_sent_count || 0) + 1; saveSms();
+    smsConfig.sms_sent_count = (smsConfig.sms_sent_count || 0) + 1; saveSms(); firebaseSaveSmsConfig();
     showToast('✅ ' + svcLabel + ' · SMS yuborildi!', 'success');
   } else {
     showToast('✅ ' + (SVC_META[type]?.label || 'Xizmat') + ' almashtirildi!', 'success');
