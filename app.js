@@ -5,6 +5,11 @@
 
 const FIREBASE_URL = 'https://gilamuz-8308f-default-rtdb.firebaseio.com';
 
+// ── BACKEND API URL ──────────────────────────────────────────────
+// Node.js server.js ishga tushirilgandan keyin shu URL ishlatiladi.
+// Agar backend yo'q bo'lsa — eski to'g'ridan-to'g'ri devsms yo'l ishlatiladi.
+const BACKEND_URL = 'http://localhost:3001';
+
 // ===== LOCAL DB =====
 const DB = {
   get(k, d = []) { try { const v = localStorage.getItem('mt_' + k); return v ? JSON.parse(v) : d; } catch { return d; } },
@@ -43,10 +48,14 @@ const FB = {
 
 // ===== DEFAULT SMS =====
 const DEFAULT_SMS = {
-  save_message:           '{car_name} ({car_number}) saqlandi!\n📅 {date} {time}\n🔧 Almashtirildi: {services}\n🏁 Probeg: {km} km',
-  oil_message:            '{car_name} ({car_number}) — dvigatel moyi: {oil_brand}\n📅 {date} {time} · 🏁 {km} km',
-  gearbox_message:        '{car_name} ({car_number}) — karobka moyi yangilandi\n📅 {date} {time} · 🏁 {km} km',
-  default_change_message: '{car_name} ({car_number}) — {service_label} almashtirildi\n📅 {date} {time} · 🏁 {km} km',
+  save_message:            '{car_name} ({car_number}) saqlandi!\n📅 {date} {time}\n🔧 Almashtirildi: {services}\n🏁 Probeg: {km} km',
+  oil_message:             '{car_name} ({car_number}) — dvigatel moyi: {oil_brand}\n📅 {date} {time} · 🏁 {km} km',
+  gearbox_message:         '{car_name} ({car_number}) — karobka moyi yangilandi\n📅 {date} {time} · 🏁 {km} km',
+  antifreeze_message:      '{car_name} ({car_number}) — antifriz yangilandi\n📅 {date} {time} · 🏁 {km} km',
+  air_filter_message:      '{car_name} ({car_number}) — havo filtr almashtirildi\n📅 {date} {time} · 🏁 {km} km',
+  cabin_filter_message:    '{car_name} ({car_number}) — salon filtr almashtirildi\n📅 {date} {time} · 🏁 {km} km',
+  oil_filter_message:      '{car_name} ({car_number}) — moy filtr almashtirildi\n📅 {date} {time} · 🏁 {km} km',
+  default_change_message:  '{car_name} ({car_number}) — {service_label} almashtirildi\n📅 {date} {time} · 🏁 {km} km',
 };
 
 // ===== STATE =====
@@ -224,21 +233,45 @@ async function fbDeleteOil(oilId) {
 }
 
 // ── SMS CONFIG Firebase ga saqlash ──
+// ── SMS CONFIG saqlash — backend orqali (fallback: to'g'ridan Firebase) ──
 async function fbSaveSmsConfig() {
   if (!smsConfig.firebase_enabled) return;
+
   const data = {
-    devsms_token:           smsConfig.devsms_token           || '',
-    enabled:                smsConfig.enabled                || false,
-    sms_sent_count:         smsConfig.sms_sent_count         || 0,
-    firebase_enabled:       true,
-    save_message:           smsConfig.save_message           || DEFAULT_SMS.save_message,
-    oil_message:            smsConfig.oil_message            || DEFAULT_SMS.oil_message,
-    gearbox_message:        smsConfig.gearbox_message        || DEFAULT_SMS.gearbox_message,
-    default_change_message: smsConfig.default_change_message || DEFAULT_SMS.default_change_message,
+    devsms_token:            smsConfig.devsms_token            || '',
+    enabled:                 smsConfig.enabled                 || false,
+    sms_sent_count:          smsConfig.sms_sent_count          || 0,
+    firebase_enabled:        true,
+    save_message:            smsConfig.save_message            || DEFAULT_SMS.save_message,
+    oil_message:             smsConfig.oil_message             || DEFAULT_SMS.oil_message,
+    gearbox_message:         smsConfig.gearbox_message         || DEFAULT_SMS.gearbox_message,
+    antifreeze_message:      smsConfig.antifreeze_message      || DEFAULT_SMS.antifreeze_message,
+    air_filter_message:      smsConfig.air_filter_message      || DEFAULT_SMS.air_filter_message,
+    cabin_filter_message:    smsConfig.cabin_filter_message    || DEFAULT_SMS.cabin_filter_message,
+    oil_filter_message:      smsConfig.oil_filter_message      || DEFAULT_SMS.oil_filter_message,
+    default_change_message:  smsConfig.default_change_message  || DEFAULT_SMS.default_change_message,
   };
+
+  // ── 1) Backend orqali urinish ─────────────────────────────
+  try {
+    const r = await fetch(`${BACKEND_URL}/api/sms-config`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(data),
+      signal:  AbortSignal.timeout(4000),
+    });
+    if (r.ok) {
+      console.log('✅ Backend: sms_config saqlandi (Firebase ga ham yozildi)');
+      return;
+    }
+  } catch (e) {
+    console.warn('⚠️ Backend sms_config ishlamadi, fallback Firebase REST:', e.message);
+  }
+
+  // ── 2) Fallback: to'g'ridan Firebase REST ────────────────
   const r = await FB.put('sms_config', data);
-  if (r.ok) console.log('✅ FB sms_config: saqlandi');
-  else      console.warn('⚠️ FB sms_config xato:', r.status, r.error);
+  if (r.ok) console.log('✅ Firebase sms_config: saqlandi (fallback)');
+  else      console.warn('⚠️ Firebase sms_config xato:', r.status, r.error);
 }
 
 // ── FIREBASE TEST ──
@@ -490,19 +523,48 @@ function buildSaveSmsText(car, checkedKeys) {
 }
 
 // ===== DEVSMS =====
+// ── SMS YUBORISH — backend orqali (fallback: to'g'ridan-to'g'ri) ──
+// BACKEND_URL ishlayotgan bo'lsa — /api/sms/send endpoint orqali ketadi.
+// Aks holda to'g'ridan-to'g'ri devsms.uz ga murojaat qiladi.
+
 async function sendSms(text, phone) {
   const token = smsConfig.devsms_token;
-  if (!token || !phone) { console.log(`📤 SMS (token yo'q) → ${phone}\n${text}`); return { ok: false }; }
+  if (!token || !phone) {
+    console.log(`📤 SMS (token yo'q) → ${phone}\n${text}`);
+    return { ok: false };
+  }
+
+  // ── 1) Backend orqali urinish ─────────────────────────────
+  try {
+    const r = await fetch(`${BACKEND_URL}/api/sms/send`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ token, phone, message: text }),
+      signal:  AbortSignal.timeout(4000), // 4s timeout
+    });
+    if (r.ok) {
+      const data = await r.json().catch(() => ({}));
+      console.log('📡 Backend SMS javob:', data);
+      return data;
+    }
+  } catch (e) {
+    console.warn('⚠️ Backend SMS ishlamadi, fallback:', e.message);
+  }
+
+  // ── 2) Fallback: to'g'ridan-to'g'ri devsms.uz ───────────
   try {
     const r = await fetch('https://devsms.uz/api/send_sms.php', {
-      method: 'POST',
+      method:  'POST',
       headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone: phone.replace(/\D/g, ''), message: text })
+      body:    JSON.stringify({ phone: phone.replace(/\D/g, ''), message: text }),
     });
     const data = await r.json().catch(() => ({}));
-    console.log('DevSMS javob:', data);
+    console.log('DevSMS fallback javob:', data);
     return data;
-  } catch(e) { console.warn('SMS xatosi:', e); return { ok: false }; }
+  } catch (e) {
+    console.warn('SMS xatosi (fallback):', e);
+    return { ok: false };
+  }
 }
 
 // ===== AVTOMATIK TEKSHIRUV =====
@@ -644,9 +706,13 @@ function loadSmsPage() {
   if (fbUrlEl) fbUrlEl.textContent = FIREBASE_URL;
   const fbEnEl = document.getElementById('firebase-enabled');
   if (fbEnEl) fbEnEl.checked = !!smsConfig.firebase_enabled;
-  document.getElementById('sms-save-message').value    = smsConfig.save_message    || DEFAULT_SMS.save_message;
-  document.getElementById('sms-oil-message').value     = smsConfig.oil_message     || DEFAULT_SMS.oil_message;
-  document.getElementById('sms-gearbox-message').value = smsConfig.gearbox_message || DEFAULT_SMS.gearbox_message;
+  document.getElementById('sms-save-message').value         = smsConfig.save_message         || DEFAULT_SMS.save_message;
+  document.getElementById('sms-oil-message').value          = smsConfig.oil_message          || DEFAULT_SMS.oil_message;
+  document.getElementById('sms-gearbox-message').value      = smsConfig.gearbox_message      || DEFAULT_SMS.gearbox_message;
+  document.getElementById('sms-antifreeze-message').value   = smsConfig.antifreeze_message   || DEFAULT_SMS.antifreeze_message;
+  document.getElementById('sms-air-filter-message').value   = smsConfig.air_filter_message   || DEFAULT_SMS.air_filter_message;
+  document.getElementById('sms-cabin-filter-message').value = smsConfig.cabin_filter_message || DEFAULT_SMS.cabin_filter_message;
+  document.getElementById('sms-oil-filter-message').value   = smsConfig.oil_filter_message   || DEFAULT_SMS.oil_filter_message;
   document.getElementById('sms-sent-count').textContent = (smsConfig.sms_sent_count || 0).toLocaleString();
 
   const ae = document.getElementById('sms-api-status');
@@ -661,14 +727,18 @@ function loadSmsPage() {
 }
 document.getElementById('sms-config-form').addEventListener('submit', e => {
   e.preventDefault();
-  smsConfig.devsms_token      = document.getElementById('devsms-token').value.trim();
-  smsConfig.enabled           = document.getElementById('sms-enabled').checked;
-  smsConfig.firebase_enabled  = document.getElementById('firebase-enabled')?.checked ?? true;
-  smsConfig.save_message      = document.getElementById('sms-save-message').value;
-  smsConfig.oil_message       = document.getElementById('sms-oil-message').value;
-  smsConfig.gearbox_message   = document.getElementById('sms-gearbox-message').value;
+  smsConfig.devsms_token         = document.getElementById('devsms-token').value.trim();
+  smsConfig.enabled              = document.getElementById('sms-enabled').checked;
+  smsConfig.firebase_enabled     = document.getElementById('firebase-enabled')?.checked ?? true;
+  smsConfig.save_message         = document.getElementById('sms-save-message').value;
+  smsConfig.oil_message          = document.getElementById('sms-oil-message').value;
+  smsConfig.gearbox_message      = document.getElementById('sms-gearbox-message').value;
+  smsConfig.antifreeze_message   = document.getElementById('sms-antifreeze-message').value;
+  smsConfig.air_filter_message   = document.getElementById('sms-air-filter-message').value;
+  smsConfig.cabin_filter_message = document.getElementById('sms-cabin-filter-message').value;
+  smsConfig.oil_filter_message   = document.getElementById('sms-oil-filter-message').value;
   saveSms();
-  fbSaveSmsConfig(); // ← Firebase ga SMS config saqlash
+  fbSaveSmsConfig(); // ← Firebase ga barcha shablonlar bilan saqlash
   startAutoCheck();
   showToast('✅ SMS sozlamalari saqlandi!', 'success');
   loadSmsPage();
