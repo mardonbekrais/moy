@@ -266,16 +266,20 @@
             </div>
             <div class="fc">
               <div class="fct">🗄️ Supabase Ulanish</div>
-              <p style="font-size:12px;color:var(--text2);margin-bottom:10px">Mashina va xizmat ma'lumotlarini Supabase bazasiga saqlash uchun</p>
+              <!-- MUHIM: "anon public" key kerak — Supabase dashboard > Settings > API -->
+              <div style="background:var(--wbg);border:1.5px solid var(--wbr);border-radius:var(--rs);padding:10px 12px;margin-bottom:12px;font-size:12px;color:var(--warning);line-height:1.6">
+                ⚠️ <strong>Diqqat:</strong> REST API uchun <strong>anon public</strong> key kerak.<br>
+                Supabase Dashboard → Settings → API → <em>"anon public"</em> kalitni oling (<code>eyJ...</code> bilan boshlanadi).<br>
+                <strong>Jadvallarni ham yaratish kerak</strong> — SQL Editor'da yuqoridagi kommentdan nusxa oling.
+              </div>
               <div class="fg">
                 <label>Supabase URL</label>
-                <input type="url" id="supabase-url" value="https://qscvtxtgbwbshkrqklgk.supabase.co" readonly style="opacity:.7;cursor:default">
+                <input type="url" id="supabase-url" placeholder="https://xxxx.supabase.co">
               </div>
               <div class="fg">
-                <label>Supabase Anon Key</label>
-                <input type="text" id="supabase-key" value="sb_publishable_SsWaBdGmEv6RvF33oAv4bw_qTjFC5mY" readonly autocomplete="off" style="opacity:.7;cursor:default;font-size:11px">
+                <label>Supabase Anon Key <span style="font-weight:400;text-transform:none;font-size:10px">(eyJ... bilan boshlanadi)</span></label>
+                <input type="text" id="supabase-key" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." autocomplete="off">
               </div>
-              <!-- Test tugmasi va natija -->
               <button type="button" class="btn-test-supa" id="btn-test-supabase" onclick="testSupabase()">
                 🔗 Ulanishni Tekshirish
               </button>
