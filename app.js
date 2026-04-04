@@ -95,6 +95,22 @@ const saveOils = () => DB.set('oils', allOils);
 const saveSms  = () => DB.set('sms',  smsConfig);
 const saveCfg  = () => DB.set('cfg',  cfg);
 
+// Firebase dan mashinalarni yuklash
+async function loadCarsFromFirebase() {
+  try {
+    const r = await FB.get('cars');
+    if (r.ok && r.data && typeof r.data === 'object') {
+      const fbCars = Object.values(r.data).filter(Boolean);
+      if (fbCars.length > 0) {
+        allCars = fbCars;
+        saveCars();
+      }
+    }
+  } catch(e) { console.warn('Firebase yuklanmadi, LocalStorage ishlatilmoqda'); }
+  loadDashboard();
+  renderOilSel('oil-name');
+}
+
 // ===== SERVICE META =====
 const SVC_META = {
   oil:          { icon: '🛢️', label: 'Dvigatel Moyi' },
@@ -465,14 +481,28 @@ async function testFirebase() {
 async function firebaseSaveCar(car) {
   if (!smsConfig.firebase_enabled) return;
   const data = {
-    car_name:    car.car_name,
-    car_number:  car.car_number,
+    id:           car.id,
+    car_name:     car.car_name,
+    car_number:   car.car_number,
     phone_number: car.phone_number,
-    total_km:    car.total_km,
-    oil_name:    car.oil_name,
-    added_at:    car.added_at
+    total_km:     car.total_km,
+    oil_name:     car.oil_name,
+    daily_km:     car.daily_km,
+    oil_change_km:         car.oil_change_km,
+    antifreeze_km:         car.antifreeze_km,
+    antifreeze_interval:   car.antifreeze_interval,
+    gearbox_km:            car.gearbox_km,
+    gearbox_interval:      car.gearbox_interval,
+    air_filter_km:         car.air_filter_km,
+    air_filter_interval:   car.air_filter_interval,
+    cabin_filter_km:       car.cabin_filter_km,
+    cabin_filter_interval: car.cabin_filter_interval,
+    oil_filter_km:         car.oil_filter_km,
+    oil_filter_interval:   car.oil_filter_interval,
+    history:      car.history || [],
+    added_at:     car.added_at
   };
-  const r = await FB.put(`cars/${car.id}`, data);
+  const r = await FB.put(`cars/car_${car.id}`, data);
   if (r.ok) console.log('✅ Firebase: mashina saqlandi');
   else      console.warn('⚠️ Firebase cars xato:', r.status, r.error);
 }
@@ -496,7 +526,7 @@ async function firebaseSaveServiceChange(car, type, km) {
 // Mashina o'chirish Firebase dan
 async function firebaseDeleteCar(carId) {
   if (!smsConfig.firebase_enabled) return;
-  const r = await FB.delete(`cars/${carId}`);
+  const r = await FB.delete(`cars/car_${carId}`);
   if (r.ok) console.log('✅ Firebase: mashina o\'chirildi');
   else      console.warn('⚠️ Firebase delete xato:', r.status);
 }
@@ -787,8 +817,10 @@ function init() {
   document.getElementById('setting-warn').value   = cfg.warn_pct;
   document.getElementById('setting-danger').value = cfg.danger_pct;
   if (!DB.get('oils_init', false)) { saveOils(); DB.set('oils_init', true); }
+  // Avval LocalStorage dan ko'rsatamiz (tez), keyin Firebase dan yangilaymiz
   loadDashboard();
   renderOilSel('oil-name');
+  loadCarsFromFirebase();
   startAutoCheck();
 }
 init();
