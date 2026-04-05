@@ -107,7 +107,7 @@
               <div class="fg"><label>Telefon Raqami</label><input type="tel" id="phone-number" placeholder="+998901234567" required></div>
             </div>
 
-            <!-- 2. Qaysilar almashtirildi -->
+            <!-- 2. Qaysilar almashtirildi (checkbox) -->
             <div class="fc">
               <div class="fct">✅ Hozir nima almashtirildi?</div>
               <p style="font-size:12px;color:var(--text2);margin-bottom:12px">Mashinani saqlashda belgilangan xizmatlar SMS ga yuboriladi</p>
@@ -162,9 +162,9 @@
               <div class="fg">
                 <label>Joriy holat</label>
                 <div class="pill-group">
-                  <button type="button" class="pill-btn green" onclick="setPillStatus('anti','green',this)">🟢 Yaxshi</button>
-                  <button type="button" class="pill-btn yellow" onclick="setPillStatus('anti','yellow',this)">🟡 Tez orada</button>
-                  <button type="button" class="pill-btn red" onclick="setPillStatus('anti','red',this)">🔴 Hoziroq</button>
+                  <button type="button" class="pill-btn green" data-svc="anti" data-st="green" onclick="setPillStatus('anti','green',this)">🟢 Yaxshi</button>
+                  <button type="button" class="pill-btn yellow" data-svc="anti" data-st="yellow" onclick="setPillStatus('anti','yellow',this)">🟡 Tez orada</button>
+                  <button type="button" class="pill-btn red" data-svc="anti" data-st="red" onclick="setPillStatus('anti','red',this)">🔴 Hoziroq</button>
                 </div>
                 <div class="shint-wrap" id="anti-pill-hint"></div>
               </div>
@@ -182,9 +182,9 @@
               <div class="fg">
                 <label>Joriy holat</label>
                 <div class="pill-group">
-                  <button type="button" class="pill-btn green" onclick="setPillStatus('gear','green',this)">🟢 Yaxshi</button>
-                  <button type="button" class="pill-btn yellow" onclick="setPillStatus('gear','yellow',this)">🟡 Tez orada</button>
-                  <button type="button" class="pill-btn red" onclick="setPillStatus('gear','red',this)">🔴 Hoziroq</button>
+                  <button type="button" class="pill-btn green" data-svc="gear" data-st="green" onclick="setPillStatus('gear','green',this)">🟢 Yaxshi</button>
+                  <button type="button" class="pill-btn yellow" data-svc="gear" data-st="yellow" onclick="setPillStatus('gear','yellow',this)">🟡 Tez orada</button>
+                  <button type="button" class="pill-btn red" data-svc="gear" data-st="red" onclick="setPillStatus('gear','red',this)">🔴 Hoziroq</button>
                 </div>
                 <div class="shint-wrap" id="gear-pill-hint"></div>
               </div>
@@ -234,18 +234,16 @@
         <div class="fw">
           <h2 class="ptitle">SMS Sozlamalari</h2>
           <div class="scard" id="sms-status-card"><div id="sms-status" class="st">❌ SMS o'chirilgan</div></div>
-
           <div class="fc">
             <div class="sr"><span>📤 Yuborilgan SMS</span><strong id="sms-sent-count">0</strong></div>
             <div class="sr"><span>📡 API holati</span><strong id="sms-api-status">—</strong></div>
             <button class="bghost" onclick="resetSmsCount()">🔄 Hisoblagichni tiklash</button>
           </div>
-
           <!-- ── TEST TELEFON RAQAMI ── -->
           <div class="fc" id="test-phone-block">
             <div class="fct">📲 Test SMS raqami</div>
             <p style="font-size:12px;color:var(--text2);margin-bottom:10px">
-              "📤 Test SMS" tugmasi bosilganda shu raqamga yuboriladi.
+              "📤 Test SMS" tugmasi bosilganda shu raqamga yuboriladi. Saqlangandan keyin faol bo'ladi.
             </p>
             <div class="fg" style="display:flex;gap:8px;align-items:flex-end">
               <div style="flex:1">
@@ -263,10 +261,9 @@
             <div class="svars">
               <code>{car_name}</code><code>{car_number}</code><code>{km}</code>
               <code>{date}</code><code>{time}</code><code>{services}</code>
-              <code>{oil_brand}</code><code>{service_label}</code>
+              <code>{oil_brand}</code><code>{remain_km}</code>
             </div>
           </div>
-
           <form id="sms-config-form">
             <div class="fc">
               <div class="fct">📱 DevSMS API Token</div>
@@ -281,9 +278,15 @@
                 <label class="tl">SMS yoqish</label>
                 <label class="tg"><input type="checkbox" id="sms-enabled"><span class="ts"></span></label>
               </div>
-              <button type="submit" class="bsub" style="margin-top:12px">✅ Saqlash va Ishga Tushurish</button>
+              <!-- Token tekshirish tugmasi -->
+              <button type="button" class="btn-test-supa" id="btn-test-token" onclick="testDevsmsToken()" style="margin-top:10px">
+                🔍 Token tekshirish
+              </button>
+              <div id="token-test-result" class="supa-result" style="display:none;margin-top:8px"></div>
+              <!-- Saqlash tugmasi -->
+              <button type="submit" class="bsub" id="btn-sms-submit" style="margin-top:10px">💾 Saqlash va Ishga Tushurish</button>
+              <div id="sms-save-result" class="supa-result" style="display:none;margin-top:8px"></div>
             </div>
-
             <div class="fc">
               <div class="fct">🔥 Firebase Ulanish</div>
               <div style="background:var(--sbg);border:1.5px solid var(--sbr);border-radius:var(--rs);padding:10px 12px;margin-bottom:12px;font-size:12px;color:var(--success);line-height:1.6">
@@ -299,7 +302,6 @@
                 <label class="tg"><input type="checkbox" id="firebase-enabled" checked><span class="ts"></span></label>
               </div>
             </div>
-
             <!-- ═══ SHABLONLAR ═══ -->
             <div class="fc">
               <div class="fct">📩 Mashina saqlash shabloni</div>
@@ -394,21 +396,6 @@
 
             </div>
           </form>
-
-          <!-- ═══ SMS LOG PANEL (YANGI) ═══ -->
-          <div class="fc sms-log-panel">
-            <div class="sms-log-header-bar">
-              <div class="fct" style="margin-bottom:0">📨 Yuborilgan SMS tarixi</div>
-              <button class="bghost" style="margin-top:0;width:auto;padding:6px 12px;font-size:12px" onclick="clearSmsLog()">🗑️ Tozalash</button>
-            </div>
-            <p style="font-size:12px;color:var(--text2);margin-bottom:10px;margin-top:8px">
-              Har bir yuborilgan yoki xato SMS shu yerda ko'rinadi — qaysi raqamga, qanday matn ketgani bilan.
-            </p>
-            <div id="sms-log-list">
-              <div class="sms-log-empty">📭 Hozircha SMS yuborilmagan</div>
-            </div>
-          </div>
-
         </div>
       </div>
     </section>
@@ -423,6 +410,8 @@
         <span id="emod-title" class="emod-title">Shablonni Tahrirlash</span>
         <button class="emod-close" onclick="closeEditor()">✕</button>
       </div>
+
+      <!-- O'zgaruvchilar chip-lari -->
       <div class="emod-vars">
         <span class="emod-vars-label">O'zgaruvchilar — bosing qo'shish uchun:</span>
         <div class="emod-chips">
@@ -436,11 +425,17 @@
           <button type="button" class="evar-chip" onclick="insertVar('{service_label}')">{service_label}</button>
         </div>
       </div>
+
+      <!-- Asosiy textarea -->
       <textarea id="emod-textarea" class="emod-textarea" placeholder="SMS matni..."></textarea>
+
+      <!-- Preview -->
       <div class="emod-preview-wrap">
         <div class="emod-preview-label">Ko'rinish:</div>
         <div id="emod-preview" class="emod-preview"></div>
       </div>
+
+      <!-- Amallar -->
       <div class="emod-footer">
         <button type="button" class="emod-btn-reset" onclick="resetEditorToDefault()">↩ Asliga qaytarish</button>
         <div style="display:flex;gap:10px">
@@ -487,7 +482,7 @@
           <div class="srow click" onclick="exportData()"><span>📤 Eksport (JSON)</span><span>›</span></div>
           <div class="srow click dr" onclick="confirmClear()"><span>🗑️ Barcha ma'lumotlarni o'chirish</span><span>›</span></div>
         </div>
-        <div class="ver">MoyTrack v4.3 Pro · Firebase 🔥</div>
+        <div class="ver">MoyTrack v4.2 Pro · Firebase 🔥</div>
       </div>
     </div>
   </div>
