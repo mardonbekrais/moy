@@ -921,51 +921,37 @@ async function verifyToken() {
   showTmplResult(resEl, 'loading', '⏳ Token tekshirilmoqda...');
   if (btn) setBtnState(btn, 'loading', '⏳ Tekshirilmoqda...');
 
-  // Balansni formatlash yordamchisi
-  function fmtBalance(data) {
-    // devsms.uz turli formatlarda qaytarishi mumkin
-    const bal = data?.balance ?? data?.data?.balance ?? data?.amount ?? data?.data?.amount;
-    if (bal === undefined || bal === null) return '';
-    return ` · 💰 Balans: ${Number(bal).toLocaleString()} so'm`;
+  function fmtBalance(balance) {
+    if (balance === null || balance === undefined || balance === '') return '';
+    return ` · 💰 Balans: ${Number(balance).toLocaleString()} so'm`;
   }
 
-  // ── 1) Backend orqali urinish ─────────────────────────────
+  function resetBtn() {
+    if (btn) setBtnState(btn, '', '🔍 Token Tekshirish');
+  }
+
   try {
     const r = await fetch(`${BACKEND_URL}/api/sms/verify-token`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token }), signal: AbortSignal.timeout(5000),
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+      signal: AbortSignal.timeout(10000),
     });
-    if (r.ok) {
-      const d = await r.json().catch(() => ({}));
-      if (btn) setBtnState(btn, '', '🔍 Token Tekshirish');
-      if (d.ok) {
-        showTmplResult(resEl, 'ok', `✅ Token to'g'ri${fmtBalance(d)}`);
-      } else {
-        showTmplResult(resEl, 'fail', `❌ Token xato yoki muddati o'tgan`);
-      }
-      return;
+    const d = await r.json().catch(() => ({}));
+    resetBtn();
+    if (d.ok) {
+      showTmplResult(resEl, 'ok', `✅ Token to'g'ri${fmtBalance(d.balance)}`);
+    } else {
+      const hint = d.http_status ? ` (HTTP ${d.http_status})` : '';
+      showTmplResult(resEl, 'fail', `❌ Token xato yoki muddati o'tgan${hint}`);
     }
   } catch(e) {
-    console.warn('⚠️ Backend verify ishlamadi, fallback:', e.message);
-  }
-
-  // ── 2) Fallback: to'g'ridan devsms.uz ga ─────────────────
-  try {
-    const r2 = await fetch('https://devsms.uz/api/balance.php', {
-      method: 'GET',
-      headers: { 'Authorization': 'Bearer ' + token },
-      signal: AbortSignal.timeout(7000),
-    });
-    const d2 = await r2.json().catch(() => ({}));
-    if (btn) setBtnState(btn, '', '🔍 Token Tekshirish');
-    if (r2.ok && (d2?.balance !== undefined || d2?.status === 'success' || d2?.amount !== undefined)) {
-      showTmplResult(resEl, 'ok', `✅ Token to'g'ri${fmtBalance(d2)}`);
+    resetBtn();
+    if (e.name === 'TimeoutError' || e.name === 'AbortError') {
+      showTmplResult(resEl, 'fail', `❌ Vaqt tugadi — backend server ishlamayapti`);
     } else {
-      showTmplResult(resEl, 'fail', `❌ Token xato yoki muddati o'tgan`);
+      showTmplResult(resEl, 'fail', `❌ Backend bilan bog'lanib bo'lmadi`);
     }
-  } catch(e2) {
-    if (btn) setBtnState(btn, '', '🔍 Token Tekshirish');
-    showTmplResult(resEl, 'fail', `❌ Tekshirib bo'lmadi: server yoki internet muammosi`);
   }
 }
 

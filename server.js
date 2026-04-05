@@ -280,12 +280,40 @@ app.post('/api/sms/verify-token', async (req, res) => {
   const { token } = req.body || {};
   if (!token) return res.status(400).json({ ok: false, error: 'token majburiy' });
   try {
-    const r = await fetch('https://devsms.uz/api/balance.php', { method: 'GET', headers: { 'Authorization': 'Bearer ' + token } });
-    const data = await r.json().catch(() => ({}));
-    res.json({ ok: r.ok || !!data?.balance, balance: data?.balance, data });
+    const r = await fetch('https://devsms.uz/api/balance.php', {
+      method: 'GET',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(8000),
+    });
+    const text = await r.text();
+    let data = {};
+    try { data = JSON.parse(text); } catch(_) { data = { raw: text }; }
+
+    // devsms.uz turli formatda qaytarishi mumkin — barchasini tekshiramiz
+    const balance =
+      data?.balance ??
+      data?.data?.balance ??
+      data?.amount ??
+      data?.data?.amount ??
+      data?.uzs ??
+      null;
+
+    // Token to'g'ri belgilari
+    const isOk =
+      r.ok &&
+      (
+        balance !== null ||
+        data?.status === 'success' ||
+        data?.status === 'ok' ||
+        data?.message_id !== undefined ||
+        data?.user !== undefined
+      );
+
+    console.log(`[verify-token] HTTP ${r.status} | ok=${isOk} | balance=${balance} | raw=${text.slice(0,200)}`);
+    res.json({ ok: isOk, balance, http_status: r.status, data });
   } catch (e) {
-    const isJwt = token.startsWith('eyJ') && token.split('.').length === 3;
-    res.json({ ok: isJwt, note: "Token format " + (isJwt ? "to'g'ri" : "noto'g'ri"), error: e.message });
+    console.warn('[verify-token] fetch xato:', e.message);
+    res.json({ ok: false, error: e.message });
   }
 });
 
