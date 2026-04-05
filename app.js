@@ -816,13 +816,16 @@ async function checkBackendStatus() {
   const firebaseEl = document.getElementById('sms-firebase-status');
   if (backendEl)  { backendEl.textContent  = '⏳...'; backendEl.style.color  = 'var(--text2)'; }
   if (firebaseEl) { firebaseEl.textContent = '⏳...'; firebaseEl.style.color = 'var(--text2)'; }
-  // Backend
+  // Backend — /health yo'q bo'lsa /api ni tekshiramiz
   try {
-    const r = await fetch(`${BACKEND_URL}/health`, { signal: AbortSignal.timeout(4000) });
-    const d = await r.json().catch(() => ({}));
+    let r = await fetch(BACKEND_URL + '/health', { signal: AbortSignal.timeout(4000) }).catch(() => null);
+    if (!r || r.status === 404) {
+      r = await fetch(BACKEND_URL + '/api', { signal: AbortSignal.timeout(4000) }).catch(() => null);
+    }
+    const ok = r && r.ok;
     if (backendEl) {
-      backendEl.textContent  = r.ok ? '✅ Ulangan' : '❌ Xato';
-      backendEl.style.color  = r.ok ? 'var(--success)' : 'var(--danger)';
+      backendEl.textContent = ok ? '✅ Ulangan' : '❌ Xato';
+      backendEl.style.color = ok ? 'var(--success)' : 'var(--danger)';
     }
   } catch(e) {
     if (backendEl) { backendEl.textContent = '❌ Ulangan emas'; backendEl.style.color = 'var(--danger)'; }
@@ -923,7 +926,7 @@ async function verifyToken() {
 
   function fmtBalance(balance) {
     if (balance === null || balance === undefined || balance === '') return '';
-    return ` · 💰 Balans: ${Number(balance).toLocaleString()} so'm`;
+    return ' · 💰 Balans: ' + Number(balance).toLocaleString() + ' so'm';
   }
 
   function resetBtn() {
@@ -931,29 +934,37 @@ async function verifyToken() {
   }
 
   try {
-    const r = await fetch(`${BACKEND_URL}/api/sms/verify-token`, {
+    const r = await fetch(BACKEND_URL + '/api/sms/verify-token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token }),
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(12000),
     });
+
+    // Backend 404 qaytarsa — eski server versiyasi, to'g'ridan devsms.uz tekshiramiz
+    if (r.status === 404) {
+      resetBtn();
+      showTmplResult(resEl, 'fail', '❌ Backend /verify-token endpoint topilmadi — server.js ni yangilang');
+      return;
+    }
+
     const d = await r.json().catch(() => ({}));
-    resetBtn();
     console.log('[verifyToken] server javobi:', JSON.stringify(d));
+    resetBtn();
+
     if (d.ok) {
-      showTmplResult(resEl, 'ok', `✅ Token to'g'ri${fmtBalance(d.balance)}`);
+      showTmplResult(resEl, 'ok', '✅ Token to'g'ri' + fmtBalance(d.balance));
     } else {
-      // devsms raw javobini ko'rsatamiz — xato sababini bilish uchun
-      const rawInfo = d.data?.message || d.data?.error || d.error || '';
-      const hint = rawInfo ? `: ${rawInfo}` : (d.http_status ? ` (HTTP ${d.http_status})` : '');
-      showTmplResult(resEl, 'fail', `❌ Token xato yoki muddati o'tgan${hint}`);
+      const rawInfo = (d.data && (d.data.message || d.data.error)) || d.error || '';
+      const hint = rawInfo ? (': ' + rawInfo) : (d.http_status ? (' (HTTP ' + d.http_status + ')') : '');
+      showTmplResult(resEl, 'fail', '❌ Token xato yoki muddati o'tgan' + hint);
     }
   } catch(e) {
     resetBtn();
     if (e.name === 'TimeoutError' || e.name === 'AbortError') {
-      showTmplResult(resEl, 'fail', `❌ Vaqt tugadi — backend server ishlamayapti`);
+      showTmplResult(resEl, 'fail', '❌ Vaqt tugadi — server javob bermadi');
     } else {
-      showTmplResult(resEl, 'fail', `❌ Backend bilan bog'lanib bo'lmadi`);
+      showTmplResult(resEl, 'fail', '❌ Serverga ulanib bo'lmadi: ' + e.message);
     }
   }
 }
