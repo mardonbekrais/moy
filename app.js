@@ -939,10 +939,13 @@ async function verifyToken() {
     });
     const d = await r.json().catch(() => ({}));
     resetBtn();
+    console.log('[verifyToken] server javobi:', JSON.stringify(d));
     if (d.ok) {
       showTmplResult(resEl, 'ok', `✅ Token to'g'ri${fmtBalance(d.balance)}`);
     } else {
-      const hint = d.http_status ? ` (HTTP ${d.http_status})` : '';
+      // devsms raw javobini ko'rsatamiz — xato sababini bilish uchun
+      const rawInfo = d.data?.message || d.data?.error || d.error || '';
+      const hint = rawInfo ? `: ${rawInfo}` : (d.http_status ? ` (HTTP ${d.http_status})` : '');
       showTmplResult(resEl, 'fail', `❌ Token xato yoki muddati o'tgan${hint}`);
     }
   } catch(e) {
