@@ -280,36 +280,27 @@ app.post('/api/sms/verify-token', async (req, res) => {
   const { token } = req.body || {};
   if (!token) return res.status(400).json({ ok: false, error: 'token majburiy' });
   try {
-    const r = await fetch('https://devsms.uz/api/balance.php', {
+    // devsms.uz to'g'ri endpoint: get_balance.php
+    const r = await fetch('https://devsms.uz/api/get_balance.php', {
       method: 'GET',
-      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      headers: { 'Authorization': 'Bearer ' + token },
       signal: AbortSignal.timeout(8000),
     });
     const text = await r.text();
     let data = {};
     try { data = JSON.parse(text); } catch(_) { data = { raw: text }; }
 
-    // devsms.uz turli formatda qaytarishi mumkin — barchasini tekshiramiz
+    // devsms.uz javobi: { "success": true, "data": { "balance": 1000, "sms_price": 50 } }
     const balance =
-      data?.balance ??
       data?.data?.balance ??
-      data?.amount ??
+      data?.balance ??
       data?.data?.amount ??
-      data?.uzs ??
+      data?.amount ??
       null;
 
-    // Token to'g'ri belgilari
-    const isOk =
-      r.ok &&
-      (
-        balance !== null ||
-        data?.status === 'success' ||
-        data?.status === 'ok' ||
-        data?.message_id !== undefined ||
-        data?.user !== undefined
-      );
+    const isOk = data?.success === true || (r.ok && balance !== null);
 
-    console.log(`[verify-token] HTTP ${r.status} | ok=${isOk} | balance=${balance} | raw=${text.slice(0,200)}`);
+    console.log(`[verify-token] HTTP ${r.status} | success=${data?.success} | balance=${balance} | raw=${text.slice(0,300)}`);
     res.json({ ok: isOk, balance, http_status: r.status, data });
   } catch (e) {
     console.warn('[verify-token] fetch xato:', e.message);
