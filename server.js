@@ -324,7 +324,7 @@ app.post('/api/sms/verify-token', async (req, res) => {
   }
 
   // Hamma endpoint ishlamadi
-  res.json({ ok: false, error: "devsms.uz ga ulanib boʻlmadi" });
+  res.json({ ok: false, error: 'devsms.uz ga ulanib bo'lmadi' });
 });
 
 app.post('/api/sms/reset-count', async (req, res) => {
