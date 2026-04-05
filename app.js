@@ -6,9 +6,11 @@
 const FIREBASE_URL = 'https://gilamuz-8308f-default-rtdb.firebaseio.com';
 
 // ── BACKEND API URL ──────────────────────────────────────────────
-// Node.js server.js ishga tushirilgandan keyin shu URL ishlatiladi.
-// Agar backend yo'q bo'lsa — eski to'g'ridan-to'g'ri devsms yo'l ishlatiladi.
-const BACKEND_URL = 'http://localhost:3001';
+// Avtomatik aniqlash: agar localhost bo'lsa — 3001 port,
+// aks holda — joriy sayt manzili (production deploy uchun).
+const BACKEND_URL = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+  ? `http://${location.hostname}:3001`
+  : `${location.protocol}//${location.host}`;
 
 // ===== LOCAL DB =====
 const DB = {
@@ -527,10 +529,11 @@ function buildSaveSmsText(car, checkedKeys) {
 // BACKEND_URL ishlayotgan bo'lsa — /api/sms/send endpoint orqali ketadi.
 // Aks holda to'g'ridan-to'g'ri devsms.uz ga murojaat qiladi.
 
-async function sendSms(text, phone) {
+async function sendSms(text, phone, logMeta = {}) {
   const token = smsConfig.devsms_token;
   if (!token || !phone) {
     console.log(`📤 SMS (token yo'q) → ${phone}\n${text}`);
+    addSmsLog({ ok: false, phone, message: text, error: "Token yoki telefon raqam yo'q", ...logMeta });
     return { ok: false };
   }
 
@@ -540,11 +543,12 @@ async function sendSms(text, phone) {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ token, phone, message: text }),
-      signal:  AbortSignal.timeout(4000), // 4s timeout
+      signal:  AbortSignal.timeout(4000),
     });
     if (r.ok) {
       const data = await r.json().catch(() => ({}));
       console.log('📡 Backend SMS javob:', data);
+      addSmsLog({ ok: true, phone, message: text, via: '🖥️ Backend', ...logMeta });
       return data;
     }
   } catch (e) {
@@ -559,12 +563,62 @@ async function sendSms(text, phone) {
       body:    JSON.stringify({ phone: phone.replace(/\D/g, ''), message: text }),
     });
     const data = await r.json().catch(() => ({}));
+    const isOk = r.ok || data?.status === 'success' || data?.message_id;
     console.log('DevSMS fallback javob:', data);
-    return data;
+    addSmsLog({ ok: isOk, phone, message: text, via: '📡 DevSMS direct', error: isOk ? undefined : JSON.stringify(data), ...logMeta });
+    return { ok: isOk, ...data };
   } catch (e) {
     console.warn('SMS xatosi (fallback):', e);
+    addSmsLog({ ok: false, phone, message: text, error: e.message, ...logMeta });
     return { ok: false };
   }
+}
+
+// ===== SMS LOG TIZIMI =====
+// Yuborilgan/xato SMS larni UI da ko'rsatish uchun
+const SMS_LOG_KEY = 'sms_log';
+const SMS_LOG_MAX = 50; // Maksimum 50 ta log saqlash
+
+function addSmsLog(entry) {
+  // entry: { ok, phone, message, service, car_name, error, via }
+  const log = DB.get(SMS_LOG_KEY, []);
+  log.unshift({
+    ...entry,
+    time: new Date().toLocaleString('uz-UZ'),
+    ts: Date.now(),
+  });
+  // Maksimum hajmni saqlash
+  if (log.length > SMS_LOG_MAX) log.splice(SMS_LOG_MAX);
+  DB.set(SMS_LOG_KEY, log);
+  // Agar SMS log paneli ochiq bo'lsa — yangilash
+  renderSmsLog();
+}
+
+function renderSmsLog() {
+  const el = document.getElementById('sms-log-list');
+  if (!el) return;
+  const log = DB.get(SMS_LOG_KEY, []);
+  if (log.length === 0) {
+    el.innerHTML = '<div class="sms-log-empty">📭 Hozircha SMS yuborilmagan</div>';
+    return;
+  }
+  el.innerHTML = log.map(e => `
+    <div class="sms-log-item ${e.ok ? 'sms-log-ok' : 'sms-log-fail'}">
+      <div class="sms-log-header">
+        <span class="sms-log-status">${e.ok ? '✅ Yuborildi' : '❌ Xato'}</span>
+        <span class="sms-log-phone">📱 ${e.phone || '—'}</span>
+        <span class="sms-log-time">🕐 ${e.time}</span>
+        ${e.via ? `<span class="sms-log-via">${e.via}</span>` : ''}
+      </div>
+      ${e.car_name ? `<div class="sms-log-car">🚗 ${e.car_name}${e.service ? ' · ' + e.service : ''}</div>` : ''}
+      <div class="sms-log-msg">${escHtml(e.message || '')}${e.error ? `\n❌ Xato: ${escHtml(e.error)}` : ''}</div>
+    </div>
+  `).join('');
+}
+
+function clearSmsLog() {
+  DB.set(SMS_LOG_KEY, []);
+  renderSmsLog();
 }
 
 // ===== AVTOMATIK TEKSHIRUV =====
@@ -598,7 +652,7 @@ async function autoCheckAndSend() {
         const tplKey   = svc.key + '_message';
         const tmpl     = smsConfig[tplKey] || DEFAULT_SMS[tplKey] || DEFAULT_SMS.default_change_message;
         const text     = fillTemplate(tmpl, car, svc.key).replace(/{service_label}/g, svcLabel);
-        await sendSms(text, car.phone_number);
+        await sendSms(text, car.phone_number, { car_name: car.car_name, service: svcLabel + ' (avtomatik)' });
         markSentToday(car.id, svc.key);
         smsConfig.sms_sent_count = (smsConfig.sms_sent_count || 0) + 1;
         saveSms();

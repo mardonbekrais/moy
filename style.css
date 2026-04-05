@@ -145,7 +145,7 @@ body{font-family:'DM Sans',-apple-system,sans-serif;background:var(--bg);color:v
 .sch.yellow{background:var(--wbg);border-color:var(--wbr);color:var(--warning)}
 .sch.red{background:var(--dbg);border-color:var(--dbr);color:var(--danger)}
 
-/* ===== CHECKBOXES (add car already done list) ===== */
+/* ===== CHECKBOXES ===== */
 .check-group{display:flex;flex-direction:column;gap:8px;margin-top:4px}
 .check-item{display:flex;align-items:center;gap:11px;padding:11px 13px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);cursor:pointer;transition:all .18s;-webkit-user-select:none;user-select:none}
 .check-item.checked{background:var(--sbg);border-color:var(--sbr)}
@@ -189,6 +189,52 @@ body{font-family:'DM Sans',-apple-system,sans-serif;background:var(--bg);color:v
 .tg input:checked+.ts{background:var(--primary);border-color:var(--primary)}
 .tg input:checked+.ts::before{transform:translateX(20px);background:#fff}
 .sms-autovar{background:var(--sbg);border:1px solid var(--sbr);border-radius:var(--rs);padding:9px 12px;margin-bottom:10px;font-size:12px;color:var(--success);font-weight:600}
+
+/* ===== SMS LOG PANEL (YANGI) ===== */
+.sms-log-panel{}
+.sms-log-header-bar{
+  display:flex;justify-content:space-between;align-items:center;
+  margin-bottom:0;
+}
+.sms-log-item{
+  padding:11px 13px;
+  margin-bottom:8px;
+  border-radius:var(--rs);
+  font-size:12px;
+  border-left:3px solid transparent;
+  background:var(--bg3);
+}
+.sms-log-item:last-child{margin-bottom:0}
+.sms-log-ok{border-left-color:var(--success);background:rgba(34,197,94,0.07)}
+.sms-log-fail{border-left-color:var(--danger);background:rgba(239,68,68,0.07)}
+.sms-log-header{
+  display:flex;align-items:center;flex-wrap:wrap;gap:8px;
+  margin-bottom:5px;font-weight:700;
+}
+.sms-log-status{font-size:13px}
+.sms-log-phone{color:var(--accent);font-size:12px}
+.sms-log-time{color:var(--text3);font-size:11px;margin-left:auto}
+.sms-log-via{
+  font-size:10px;color:var(--text3);
+  background:var(--bg2);border:1px solid var(--border);
+  border-radius:20px;padding:2px 8px;
+}
+.sms-log-car{
+  font-size:11px;color:var(--text2);
+  margin-bottom:5px;font-weight:600;
+}
+.sms-log-msg{
+  white-space:pre-wrap;word-break:break-word;
+  font-size:12px;line-height:1.5;
+  color:var(--text2);
+  background:var(--bg2);
+  padding:8px 10px;border-radius:7px;
+  margin-top:5px;
+}
+.sms-log-empty{
+  text-align:center;padding:24px 0;
+  color:var(--text3);font-size:13px;
+}
 
 /* ===== MODAL ===== */
 .modal{display:none;position:fixed;inset:0;z-index:1000}
@@ -258,7 +304,7 @@ body{font-family:'DM Sans',-apple-system,sans-serif;background:var(--bg);color:v
 .empty{text-align:center;padding:38px 20px;color:var(--text3)}
 .empty .ei{font-size:40px;margin-bottom:12px}.empty p{font-size:13px}
 
-/* ===== SUPABASE TEST BUTTON ===== */
+/* ===== FIREBASE TEST BUTTON ===== */
 .btn-test-supa{
   width:100%;padding:12px;margin-top:12px;
   background:var(--bg3);border:1.5px solid var(--border2);
@@ -270,7 +316,6 @@ body{font-family:'DM Sans',-apple-system,sans-serif;background:var(--bg);color:v
 .btn-test-supa.loading{opacity:.7;pointer-events:none}
 .btn-test-supa.ok{background:var(--sbg);border-color:var(--sbr);color:var(--success)}
 .btn-test-supa.fail{background:var(--dbg);border-color:var(--dbr);color:var(--danger)}
-
 .supa-result{
   margin-top:10px;padding:11px 14px;border-radius:var(--rs);
   font-size:13px;font-weight:600;line-height:1.5;
@@ -278,8 +323,6 @@ body{font-family:'DM Sans',-apple-system,sans-serif;background:var(--bg);color:v
 .supa-result.ok{background:var(--sbg);border:1.5px solid var(--sbr);color:var(--success)}
 .supa-result.fail{background:var(--dbg);border:1.5px solid var(--dbr);color:var(--danger)}
 .supa-result.loading{background:var(--bg3);border:1.5px solid var(--border2);color:var(--text2)}
-
-/* spin animation */
 @keyframes spin{to{transform:rotate(360deg)}}
 .spin{display:inline-block;animation:spin .8s linear infinite}
 
@@ -319,15 +362,13 @@ body{font-family:'DM Sans',-apple-system,sans-serif;background:var(--bg);color:v
 .btn-tmpl-save.loading{opacity:.65;pointer-events:none}
 .btn-tmpl-save.ok{background:var(--sbg);border-color:var(--sbr);color:var(--success)}
 .btn-tmpl-save.fail{background:var(--dbg);border-color:var(--dbr);color:var(--danger)}
-
 .btn-tmpl-test{
-  background:var(--bg3);color:var(--text1);border-color:var(--border2);
+  background:var(--bg3);color:var(--text);border-color:var(--border2);
 }
 .btn-tmpl-test:active{transform:scale(.97);opacity:.88}
 .btn-tmpl-test.loading{opacity:.65;pointer-events:none}
 .btn-tmpl-test.ok{background:var(--sbg);border-color:var(--sbr);color:var(--success)}
 .btn-tmpl-test.fail{background:var(--dbg);border-color:var(--dbr);color:var(--danger)}
-
 .tmpl-result{
   margin-top:8px;padding:10px 13px;border-radius:var(--rs);
   font-size:12px;font-weight:500;line-height:1.5;word-break:break-word;
@@ -384,14 +425,13 @@ body{font-family:'DM Sans',-apple-system,sans-serif;background:var(--bg);color:v
   animation:slideUp .22s ease;
 }
 @keyframes slideUp{from{transform:translateY(60px);opacity:0}to{transform:translateY(0);opacity:1}}
-
 .emod-header{
   display:flex;align-items:center;justify-content:space-between;
   padding:18px 20px 14px;
   border-bottom:1px solid var(--border);
   flex-shrink:0;
 }
-.emod-title{font-size:16px;font-weight:700;color:var(--text1)}
+.emod-title{font-size:16px;font-weight:700;color:var(--text)}
 .emod-close{
   width:32px;height:32px;border-radius:50%;border:none;
   background:var(--bg3);color:var(--text2);
@@ -399,8 +439,6 @@ body{font-family:'DM Sans',-apple-system,sans-serif;background:var(--bg);color:v
   transition:all .15s;
 }
 .emod-close:active{transform:scale(.9)}
-
-/* O'zgaruvchilar */
 .emod-vars{
   padding:12px 20px;border-bottom:1px solid var(--border);
   flex-shrink:0;
@@ -415,28 +453,24 @@ body{font-family:'DM Sans',-apple-system,sans-serif;background:var(--bg);color:v
   padding:5px 10px;border-radius:20px;
   background:var(--bg3);color:var(--accent);
   border:1.5px solid var(--border2);
-  font-size:12px;font-weight:600;font-family:'DM Mono',monospace;
+  font-size:12px;font-weight:600;font-family:'Courier New',monospace;
   cursor:pointer;transition:all .15s;
 }
 .evar-chip:active{background:var(--accent);color:#fff;transform:scale(.95)}
-
-/* Asosiy textarea */
 .emod-textarea{
   flex:1;min-height:140px;
   margin:14px 20px 0;
   padding:14px;
-  background:var(--bg1);
+  background:var(--bg3);
   border:1.5px solid var(--border2);
   border-radius:var(--rs);
-  color:var(--text1);
+  color:var(--text);
   font-size:15px;line-height:1.65;
   font-family:'DM Sans',sans-serif;
   resize:none;
   transition:border-color .15s;
 }
 .emod-textarea:focus{outline:none;border-color:var(--accent)}
-
-/* Preview */
 .emod-preview-wrap{
   margin:10px 20px 0;flex-shrink:0;
 }
@@ -450,13 +484,11 @@ body{font-family:'DM Sans',-apple-system,sans-serif;background:var(--bg);color:v
   border-radius:var(--rs);
   border-left:3px solid var(--accent);
   font-size:13px;line-height:1.65;
-  color:var(--text1);
+  color:var(--text);
   white-space:pre-wrap;word-break:break-word;
   min-height:42px;
   max-height:100px;overflow-y:auto;
 }
-
-/* Footer */
 .emod-footer{
   display:flex;align-items:center;justify-content:space-between;
   padding:14px 20px 20px;
@@ -473,7 +505,7 @@ body{font-family:'DM Sans',-apple-system,sans-serif;background:var(--bg);color:v
 .emod-btn-reset:active{transform:scale(.97)}
 .emod-btn-test{
   padding:10px 18px;border-radius:var(--rs);
-  background:var(--bg3);color:var(--text1);
+  background:var(--bg3);color:var(--text);
   border:1.5px solid var(--border2);
   font-size:14px;font-weight:600;font-family:'DM Sans',sans-serif;
   cursor:pointer;transition:all .15s;
@@ -482,7 +514,6 @@ body{font-family:'DM Sans',-apple-system,sans-serif;background:var(--bg);color:v
 .emod-btn-test.loading{opacity:.6;pointer-events:none}
 .emod-btn-test.ok{background:var(--sbg);border-color:var(--sbr);color:var(--success)}
 .emod-btn-test.fail{background:var(--dbg);border-color:var(--dbr);color:var(--danger)}
-
 .emod-btn-save{
   padding:10px 22px;border-radius:var(--rs);
   background:var(--accent);color:#fff;border:none;
