@@ -741,6 +741,18 @@ function loadSmsPage() {
   document.getElementById('sms-oil-filter-message').value   = smsConfig.oil_filter_message   || DEFAULT_SMS.oil_filter_message;
   document.getElementById('sms-sent-count').textContent = (smsConfig.sms_sent_count || 0).toLocaleString();
 
+  // Test telefon raqamini yuklash
+  const testPhoneVal = smsConfig.test_phone || DB.get('test_phone', '');
+  const tpInput = document.getElementById('test-phone-input');
+  if (tpInput) tpInput.value = testPhoneVal;
+  const tpStatus = document.getElementById('test-phone-status');
+  if (tpStatus) {
+    tpStatus.textContent = testPhoneVal
+      ? `✅ Test SMS ${testPhoneVal} ga yuboriladi`
+      : '⚠️ Raqam kiritilmagan — test SMS yuborilmaydi';
+    tpStatus.style.color = testPhoneVal ? 'var(--success)' : 'var(--text2)';
+  }
+
   const ae = document.getElementById('sms-api-status');
   ae.textContent = smsConfig.devsms_token ? '✅ Token kiritilgan' : '❌ Token kiritilmagan';
   ae.style.color = smsConfig.devsms_token ? 'var(--success)' : 'var(--danger)';
@@ -853,10 +865,10 @@ async function testTemplate(templateKey, textareaId) {
     return;
   }
 
-  // Test uchun telefon raqami — birinchi mashinadan yoki tokendan
-  const testPhone = allCars.find(c => c.phone_number)?.phone_number;
+  // Test uchun telefon raqami — avval saqlangan test raqami, keyin birinchi mashina
+  const testPhone = getTestPhone() || allCars.find(c => c.phone_number)?.phone_number;
   if (!testPhone) {
-    showTmplResult(resultEl, 'fail', "❌ Test uchun telefon raqam topilmadi — avval mashina qo'shing (telefon bilan)");
+    showTmplResult(resultEl, 'fail', '❌ Test raqam yo\'q — SMS sahifasining tepasidan kiriting va saqlang');
     return;
   }
 
@@ -954,6 +966,289 @@ function showTmplResult(el, cls, html) {
 // ── Yordamchi: HTML escape ──────────────────────────────────────
 function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ================================================================
+// TEST TELEFON RAQAMI
+// ================================================================
+
+/** Saqlangan test raqamini qaytaradi */
+function getTestPhone() {
+  return smsConfig.test_phone || DB.get('test_phone', '');
+}
+
+/** Test raqamini saqlaydi — local + Firebase */
+async function saveTestPhone() {
+  const input = document.getElementById('test-phone-input');
+  const btn   = document.getElementById('btn-save-test-phone');
+  const status = document.getElementById('test-phone-status');
+  const phone = input?.value?.trim();
+
+  if (!phone) {
+    status.textContent = '❌ Raqam kiriting';
+    status.style.color = 'var(--danger)';
+    return;
+  }
+
+  btn.classList.add('loading');
+  btn.textContent = '⏳...';
+
+  smsConfig.test_phone = phone;
+  DB.set('test_phone', phone);
+  saveSms();
+
+  try {
+    await fetch(`${BACKEND_URL}/api/sms-config`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(smsConfig),
+      signal:  AbortSignal.timeout(4000),
+    });
+  } catch(e) {
+    await FB.put('sms_config', smsConfig);
+  }
+
+  btn.classList.remove('loading');
+  btn.classList.add('ok');
+  btn.textContent = '✅ Saqlandi';
+  status.textContent = `✅ Test SMS ${phone} raqamiga yuboriladi`;
+  status.style.color = 'var(--success)';
+  setTimeout(() => {
+    btn.classList.remove('ok');
+    btn.textContent = '💾 Saqlash';
+  }, 3000);
+}
+
+// ================================================================
+// SHABLON EDITOR MODAL
+// ================================================================
+
+let _editorKey  = '';   // faol template key
+let _editorTaId = '';   // manbaa textarea id
+
+/** Editorni ochadi */
+function openEditor(templateKey, textareaId, title) {
+  _editorKey  = templateKey;
+  _editorTaId = textareaId;
+
+  const sourceVal = document.getElementById(textareaId)?.value ||
+                    smsConfig[templateKey] || DEFAULT_SMS[templateKey] || '';
+
+  document.getElementById('emod-title').textContent    = title || 'Shablonni Tahrirlash';
+  document.getElementById('emod-textarea').value       = sourceVal;
+  document.getElementById('emod-result').style.display = 'none';
+
+  updateEditorPreview();
+
+  const modal = document.getElementById('editor-modal');
+  modal.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+
+  // Textarea ni kattalashtir va focuslash
+  setTimeout(() => document.getElementById('emod-textarea')?.focus(), 80);
+}
+
+/** Editorni yopadi — o'zgarishlarni asosiy textareaga ko'chiradi */
+function closeEditor() {
+  const modal = document.getElementById('editor-modal');
+  if (!modal) return;
+  modal.style.display = 'none';
+  document.body.style.overflow = '';
+
+  // Asosiy textarea ga ko'chirish
+  const edVal = document.getElementById('emod-textarea')?.value;
+  if (_editorTaId && edVal !== undefined) {
+    const ta = document.getElementById(_editorTaId);
+    if (ta) ta.value = edVal;
+  }
+  _editorKey = _editorTaId = '';
+}
+
+/** Preview ni real vaqtda yangilab turadi */
+function updateEditorPreview() {
+  const tmpl = document.getElementById('emod-textarea')?.value || '';
+  const car  = allCars[0] || {
+    car_name: 'Nexia 3', car_number: '01A 123BC',
+    total_km: 85000, oil_name: 'SAE 5W-30'
+  };
+  const svcType  = _editorKey.replace('_message', '');
+  const svcLabel = SVC_META[svcType]?.label || svcType || 'Xizmat';
+  const preview  = tmpl
+    .replace(/{car_name}/g,     car.car_name)
+    .replace(/{car_number}/g,   car.car_number)
+    .replace(/{km}/g,           (car.total_km||0).toLocaleString())
+    .replace(/{date}/g,          nowDate())
+    .replace(/{time}/g,          nowTime())
+    .replace(/{oil_brand}/g,     car.oil_name || 'SAE 5W-30')
+    .replace(/{services}/g,      svcLabel)
+    .replace(/{service_label}/g, svcLabel);
+  const prev = document.getElementById('emod-preview');
+  if (prev) prev.textContent = preview || '—';
+}
+
+// Editor textarea o'zgarganda preview yangilanadi
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('emod-textarea')?.addEventListener('input', updateEditorPreview);
+});
+// DOMContentLoaded kutmasdan ham ishlashi uchun (skript oxirida chaqiriladi)
+(function setupEditorListener() {
+  const ta = document.getElementById('emod-textarea');
+  if (ta) ta.addEventListener('input', updateEditorPreview);
+})();
+
+/** O'zgaruvchini kursorga qo'yadi */
+function insertVar(varStr) {
+  const ta = document.getElementById('emod-textarea');
+  if (!ta) return;
+  const start = ta.selectionStart;
+  const end   = ta.selectionEnd;
+  const val   = ta.value;
+  ta.value = val.slice(0, start) + varStr + val.slice(end);
+  ta.selectionStart = ta.selectionEnd = start + varStr.length;
+  ta.focus();
+  updateEditorPreview();
+}
+
+/** Shablonni default ga qaytaradi */
+function resetEditorToDefault() {
+  if (!_editorKey) return;
+  const def = DEFAULT_SMS[_editorKey] || '';
+  document.getElementById('emod-textarea').value = def;
+  updateEditorPreview();
+}
+
+/** Editordan saqlash */
+async function editorSave() {
+  const btn   = document.getElementById('emod-btn-save');
+  const resEl = document.getElementById('emod-result');
+  const value = document.getElementById('emod-textarea')?.value?.trim();
+
+  if (!value) {
+    showTmplResult(resEl, 'fail', '❌ Shablon bo\u02BCsh');
+    return;
+  }
+
+  setBtnState(btn, 'loading', '⏳ Saqlanmoqda...');
+
+  // Asosiy textarea ga ham yoz
+  if (_editorTaId) {
+    const ta = document.getElementById(_editorTaId);
+    if (ta) ta.value = value;
+  }
+
+  // smsConfig ga yoz
+  smsConfig[_editorKey] = value;
+  saveSms();
+
+  // Backend/Firebase ga saqlash
+  let ok = false;
+  try {
+    const r = await fetch(`${BACKEND_URL}/api/sms-config`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(smsConfig),
+      signal:  AbortSignal.timeout(5000),
+    });
+    ok = r.ok;
+  } catch(e) {
+    const fbR = await FB.put('sms_config', smsConfig);
+    ok = fbR.ok;
+  }
+
+  if (ok) {
+    setBtnState(btn, 'ok', '✅ Saqlandi');
+    showTmplResult(resEl, 'ok', '✅ Shablon saqlandi va Firebase ga yuborildi');
+    setTimeout(() => closeEditor(), 1200);
+  } else {
+    setBtnState(btn, 'fail', '❌ Xato');
+    showTmplResult(resEl, 'fail', '❌ Saqlashda xato yuz berdi');
+  }
+  setTimeout(() => setBtnState(btn, '', '💾 Saqlash'), 3000);
+}
+
+/** Editordan Test SMS yuborish */
+async function editorTestSms() {
+  const btn   = document.getElementById('emod-btn-test');
+  const resEl = document.getElementById('emod-result');
+
+  if (!smsConfig.devsms_token) {
+    showTmplResult(resEl, 'fail', '❌ DevSMS token kiritilmagan');
+    return;
+  }
+
+  const testPhone = getTestPhone() || allCars.find(c => c.phone_number)?.phone_number;
+  if (!testPhone) {
+    showTmplResult(resEl, 'fail', '❌ Test raqam yo\u02BCq — tepadan kiriting va saqlang');
+    return;
+  }
+
+  const currentText = document.getElementById('emod-textarea')?.value?.trim();
+  if (!currentText) {
+    showTmplResult(resEl, 'fail', '❌ Shablon bo\u02BCsh');
+    return;
+  }
+
+  setBtnState(btn, 'loading', '⏳ Yuborilmoqda...');
+  showTmplResult(resEl, 'loading', `⏳ ${testPhone} ga yuborilmoqda...`);
+
+  try {
+    const testCar = allCars.find(c => c.phone_number) || {
+      car_name: 'Test Nexia', car_number: '01A 000AA',
+      total_km: 85000, oil_name: 'SAE 5W-30'
+    };
+
+    const r = await fetch(`${BACKEND_URL}/api/sms/test`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        token:             smsConfig.devsms_token,
+        phone:             testPhone,
+        template_key:      _editorKey,
+        template_override: currentText,
+        car:               testCar,
+      }),
+      signal: AbortSignal.timeout(10000),
+    });
+    const data = await r.json().catch(() => ({}));
+
+    if (data.ok) {
+      setBtnState(btn, 'ok', '✅ Yuborildi');
+      showTmplResult(resEl, 'ok',
+        `✅ Test SMS yuborildi → ${testPhone}\n` +
+        `<div class="preview">${escHtml(data.text || currentText)}</div>`
+      );
+    } else {
+      setBtnState(btn, 'fail', '❌ Xato');
+      showTmplResult(resEl, 'fail',
+        `❌ ${data.error || JSON.stringify(data.devsms || 'SMS yuborilmadi')}`
+      );
+    }
+  } catch(e) {
+    // Fallback
+    const svcType  = _editorKey.replace('_message','');
+    const svcLabel = SVC_META[svcType]?.label || svcType;
+    const car = allCars[0] || { car_name:'Test', car_number:'01A', total_km:0, oil_name:'SAE' };
+    const text = currentText
+      .replace(/{car_name}/g,     car.car_name)
+      .replace(/{car_number}/g,   car.car_number)
+      .replace(/{km}/g,           (car.total_km||0).toLocaleString())
+      .replace(/{date}/g,          nowDate())
+      .replace(/{time}/g,          nowTime())
+      .replace(/{oil_brand}/g,     car.oil_name)
+      .replace(/{services}/g,      svcLabel)
+      .replace(/{service_label}/g, svcLabel);
+    const smsR = await sendSms(text, testPhone);
+    if (smsR?.ok !== false) {
+      setBtnState(btn, 'ok', '✅ Yuborildi');
+      showTmplResult(resEl, 'ok',
+        `✅ Yuborildi (fallback) → ${testPhone}\n<div class="preview">${escHtml(text)}</div>`
+      );
+    } else {
+      setBtnState(btn, 'fail', '❌ Xato');
+      showTmplResult(resEl, 'fail', `❌ ${e.message || 'SMS yuborilmadi'}`);
+    }
+  }
+  setTimeout(() => setBtnState(btn, '', '📤 Test SMS'), 5000);
 }
 
 // ===== CAR MODAL =====

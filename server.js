@@ -170,6 +170,7 @@ app.post('/api/sms-config', async (req, res) => {
     cabin_filter_message:    body.cabin_filter_message    || DEFAULT_SMS.cabin_filter_message,
     oil_filter_message:      body.oil_filter_message      || DEFAULT_SMS.oil_filter_message,
     default_change_message:  body.default_change_message  || DEFAULT_SMS.default_change_message,
+    test_phone:               body.test_phone               || '',
   };
 
   const r = await fbPut('sms_config', data);

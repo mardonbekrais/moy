@@ -340,3 +340,161 @@ body{font-family:'DM Sans',-apple-system,sans-serif;background:var(--bg);color:v
   background:var(--bg2);border-radius:6px;
   font-size:11px;color:var(--text2);white-space:pre-wrap;
 }
+
+/* ===== TEST TELEFON RAQAMI ===== */
+.btn-save-phone{
+  padding:10px 16px;border-radius:var(--rs);
+  background:var(--accent);color:#fff;border:none;
+  font-size:13px;font-weight:600;font-family:'DM Sans',sans-serif;
+  cursor:pointer;white-space:nowrap;transition:all .18s;
+  flex-shrink:0;height:44px;align-self:flex-end;
+}
+.btn-save-phone:active{transform:scale(.97);opacity:.88}
+.btn-save-phone.ok{background:var(--success)}
+.btn-save-phone.loading{opacity:.6;pointer-events:none}
+
+/* ===== TAHRIRLASH TUGMASI ===== */
+.btn-tmpl-edit{
+  flex:none;
+  padding:9px 14px;border-radius:var(--rs);
+  font-size:13px;font-weight:600;font-family:'DM Sans',sans-serif;
+  cursor:pointer;transition:all .18s;
+  background:var(--bg3);color:var(--accent);
+  border:1.5px solid var(--accent);
+}
+.btn-tmpl-edit:active{transform:scale(.97)}
+
+/* ===== EDITOR MODAL ===== */
+.emod{
+  position:fixed;inset:0;z-index:9999;
+  display:flex;align-items:flex-end;justify-content:center;
+}
+.emod-overlay{
+  position:absolute;inset:0;
+  background:rgba(0,0,0,.55);backdrop-filter:blur(2px);
+}
+.emod-panel{
+  position:relative;z-index:1;
+  width:100%;max-width:600px;
+  max-height:92vh;
+  background:var(--bg2);
+  border-radius:22px 22px 0 0;
+  display:flex;flex-direction:column;
+  overflow:hidden;
+  animation:slideUp .22s ease;
+}
+@keyframes slideUp{from{transform:translateY(60px);opacity:0}to{transform:translateY(0);opacity:1}}
+
+.emod-header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:18px 20px 14px;
+  border-bottom:1px solid var(--border);
+  flex-shrink:0;
+}
+.emod-title{font-size:16px;font-weight:700;color:var(--text1)}
+.emod-close{
+  width:32px;height:32px;border-radius:50%;border:none;
+  background:var(--bg3);color:var(--text2);
+  font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;
+  transition:all .15s;
+}
+.emod-close:active{transform:scale(.9)}
+
+/* O'zgaruvchilar */
+.emod-vars{
+  padding:12px 20px;border-bottom:1px solid var(--border);
+  flex-shrink:0;
+}
+.emod-vars-label{
+  font-size:11px;color:var(--text2);font-weight:600;
+  text-transform:uppercase;letter-spacing:.5px;
+  display:block;margin-bottom:8px;
+}
+.emod-chips{display:flex;flex-wrap:wrap;gap:6px}
+.evar-chip{
+  padding:5px 10px;border-radius:20px;
+  background:var(--bg3);color:var(--accent);
+  border:1.5px solid var(--border2);
+  font-size:12px;font-weight:600;font-family:'DM Mono',monospace;
+  cursor:pointer;transition:all .15s;
+}
+.evar-chip:active{background:var(--accent);color:#fff;transform:scale(.95)}
+
+/* Asosiy textarea */
+.emod-textarea{
+  flex:1;min-height:140px;
+  margin:14px 20px 0;
+  padding:14px;
+  background:var(--bg1);
+  border:1.5px solid var(--border2);
+  border-radius:var(--rs);
+  color:var(--text1);
+  font-size:15px;line-height:1.65;
+  font-family:'DM Sans',sans-serif;
+  resize:none;
+  transition:border-color .15s;
+}
+.emod-textarea:focus{outline:none;border-color:var(--accent)}
+
+/* Preview */
+.emod-preview-wrap{
+  margin:10px 20px 0;flex-shrink:0;
+}
+.emod-preview-label{
+  font-size:11px;font-weight:600;color:var(--text2);
+  text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;
+}
+.emod-preview{
+  padding:11px 14px;
+  background:var(--bg3);
+  border-radius:var(--rs);
+  border-left:3px solid var(--accent);
+  font-size:13px;line-height:1.65;
+  color:var(--text1);
+  white-space:pre-wrap;word-break:break-word;
+  min-height:42px;
+  max-height:100px;overflow-y:auto;
+}
+
+/* Footer */
+.emod-footer{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:14px 20px 20px;
+  flex-shrink:0;
+  gap:10px;
+}
+.emod-btn-reset{
+  padding:10px 14px;border-radius:var(--rs);
+  background:transparent;color:var(--text2);
+  border:1.5px solid var(--border2);
+  font-size:13px;font-weight:600;font-family:'DM Sans',sans-serif;
+  cursor:pointer;transition:all .15s;
+}
+.emod-btn-reset:active{transform:scale(.97)}
+.emod-btn-test{
+  padding:10px 18px;border-radius:var(--rs);
+  background:var(--bg3);color:var(--text1);
+  border:1.5px solid var(--border2);
+  font-size:14px;font-weight:600;font-family:'DM Sans',sans-serif;
+  cursor:pointer;transition:all .15s;
+}
+.emod-btn-test:active{transform:scale(.97)}
+.emod-btn-test.loading{opacity:.6;pointer-events:none}
+.emod-btn-test.ok{background:var(--sbg);border-color:var(--sbr);color:var(--success)}
+.emod-btn-test.fail{background:var(--dbg);border-color:var(--dbr);color:var(--danger)}
+
+.emod-btn-save{
+  padding:10px 22px;border-radius:var(--rs);
+  background:var(--accent);color:#fff;border:none;
+  font-size:14px;font-weight:700;font-family:'DM Sans',sans-serif;
+  cursor:pointer;transition:all .15s;
+}
+.emod-btn-save:active{transform:scale(.97);opacity:.88}
+.emod-btn-save.loading{opacity:.6;pointer-events:none}
+.emod-btn-save.ok{background:var(--success)}
+.emod-btn-save.fail{background:var(--danger)}
+
+@media(min-width:600px){
+  .emod{align-items:center}
+  .emod-panel{border-radius:18px;max-height:85vh}
+}

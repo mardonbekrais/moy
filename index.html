@@ -239,6 +239,22 @@
             <div class="sr"><span>📡 API holati</span><strong id="sms-api-status">—</strong></div>
             <button class="bghost" onclick="resetSmsCount()">🔄 Hisoblagichni tiklash</button>
           </div>
+          <!-- ── TEST TELEFON RAQAMI ── -->
+          <div class="fc" id="test-phone-block">
+            <div class="fct">📲 Test SMS raqami</div>
+            <p style="font-size:12px;color:var(--text2);margin-bottom:10px">
+              "📤 Test SMS" tugmasi bosilganda shu raqamga yuboriladi. Saqlangandan keyin faol bo'ladi.
+            </p>
+            <div class="fg" style="display:flex;gap:8px;align-items:flex-end">
+              <div style="flex:1">
+                <label>Telefon raqam</label>
+                <input type="tel" id="test-phone-input" placeholder="+998901234567" autocomplete="off">
+              </div>
+              <button type="button" class="btn-save-phone" id="btn-save-test-phone" onclick="saveTestPhone()">💾 Saqlash</button>
+            </div>
+            <div id="test-phone-status" style="font-size:12px;margin-top:6px;color:var(--text2)"></div>
+          </div>
+
           <div class="fc">
             <div class="fct">Mavjud o'zgaruvchilar</div>
             <div class="sms-autovar">✨ {car_name} va {car_number} avtomatik qo'shiladi</div>
@@ -288,7 +304,8 @@
                 <textarea id="sms-save-message" rows="4" placeholder="{car_name} ({car_number}) saqlandi!&#10;📅 {date} {time}&#10;🔧 Almashtirildi: {services}&#10;🏁 Probeg: {km} km"></textarea>
               </div>
               <div class="tmpl-actions">
-                <button type="button" class="btn-tmpl-save" onclick="saveTemplate('save_message','sms-save-message')">💾 Shablonni saqlash</button>
+                <button type="button" class="btn-tmpl-edit" onclick="openEditor('save_message','sms-save-message','📩 Mashina saqlash shabloni')">✏️ Tahrirlash</button>
+                <button type="button" class="btn-tmpl-save" onclick="saveTemplate('save_message','sms-save-message')">💾 Saqlash</button>
                 <button type="button" class="btn-tmpl-test" onclick="testTemplate('save_message','sms-save-message')">📤 Test SMS</button>
               </div>
               <div id="tmpl-result-save_message" class="tmpl-result" style="display:none"></div>
@@ -303,7 +320,8 @@
                 <label>🛢️ Dvigatel Moyi</label>
                 <textarea id="sms-oil-message" rows="3" placeholder="{car_name} ({car_number}) — dvigatel moyi: {oil_brand}&#10;📅 {date} {time} · 🏁 {km} km"></textarea>
                 <div class="tmpl-actions">
-                  <button type="button" class="btn-tmpl-save" onclick="saveTemplate('oil_message','sms-oil-message')">💾 Shablonni saqlash</button>
+                  <button type="button" class="btn-tmpl-edit" onclick="openEditor('oil_message','sms-oil-message','🛢️ Dvigatel Moyi shabloni')">✏️ Tahrirlash</button>
+                  <button type="button" class="btn-tmpl-save" onclick="saveTemplate('oil_message','sms-oil-message')">💾 Saqlash</button>
                   <button type="button" class="btn-tmpl-test" onclick="testTemplate('oil_message','sms-oil-message')">📤 Test SMS</button>
                 </div>
                 <div id="tmpl-result-oil_message" class="tmpl-result" style="display:none"></div>
@@ -314,7 +332,8 @@
                 <label>🟢 Karobka Moyi</label>
                 <textarea id="sms-gearbox-message" rows="3" placeholder="{car_name} ({car_number}) — karobka moyi yangilandi&#10;📅 {date} {time} · 🏁 {km} km"></textarea>
                 <div class="tmpl-actions">
-                  <button type="button" class="btn-tmpl-save" onclick="saveTemplate('gearbox_message','sms-gearbox-message')">💾 Shablonni saqlash</button>
+                  <button type="button" class="btn-tmpl-edit" onclick="openEditor('gearbox_message','sms-gearbox-message','🟢 Karobka Moyi shabloni')">✏️ Tahrirlash</button>
+                  <button type="button" class="btn-tmpl-save" onclick="saveTemplate('gearbox_message','sms-gearbox-message')">💾 Saqlash</button>
                   <button type="button" class="btn-tmpl-test" onclick="testTemplate('gearbox_message','sms-gearbox-message')">📤 Test SMS</button>
                 </div>
                 <div id="tmpl-result-gearbox_message" class="tmpl-result" style="display:none"></div>
@@ -325,7 +344,8 @@
                 <label>🔵 Antifriz</label>
                 <textarea id="sms-antifreeze-message" rows="3" placeholder="{car_name} ({car_number}) — antifriz yangilandi&#10;📅 {date} {time} · 🏁 {km} km"></textarea>
                 <div class="tmpl-actions">
-                  <button type="button" class="btn-tmpl-save" onclick="saveTemplate('antifreeze_message','sms-antifreeze-message')">💾 Shablonni saqlash</button>
+                  <button type="button" class="btn-tmpl-edit" onclick="openEditor('antifreeze_message','sms-antifreeze-message','🔵 Antifriz shabloni')">✏️ Tahrirlash</button>
+                  <button type="button" class="btn-tmpl-save" onclick="saveTemplate('antifreeze_message','sms-antifreeze-message')">💾 Saqlash</button>
                   <button type="button" class="btn-tmpl-test" onclick="testTemplate('antifreeze_message','sms-antifreeze-message')">📤 Test SMS</button>
                 </div>
                 <div id="tmpl-result-antifreeze_message" class="tmpl-result" style="display:none"></div>
@@ -336,7 +356,8 @@
                 <label>💨 Havo Filtr</label>
                 <textarea id="sms-air-filter-message" rows="3" placeholder="{car_name} ({car_number}) — havo filtr almashtirildi&#10;📅 {date} {time} · 🏁 {km} km"></textarea>
                 <div class="tmpl-actions">
-                  <button type="button" class="btn-tmpl-save" onclick="saveTemplate('air_filter_message','sms-air-filter-message')">💾 Shablonni saqlash</button>
+                  <button type="button" class="btn-tmpl-edit" onclick="openEditor('air_filter_message','sms-air-filter-message','💨 Havo Filtr shabloni')">✏️ Tahrirlash</button>
+                  <button type="button" class="btn-tmpl-save" onclick="saveTemplate('air_filter_message','sms-air-filter-message')">💾 Saqlash</button>
                   <button type="button" class="btn-tmpl-test" onclick="testTemplate('air_filter_message','sms-air-filter-message')">📤 Test SMS</button>
                 </div>
                 <div id="tmpl-result-air_filter_message" class="tmpl-result" style="display:none"></div>
@@ -347,7 +368,8 @@
                 <label>🌬️ Salon Filtr</label>
                 <textarea id="sms-cabin-filter-message" rows="3" placeholder="{car_name} ({car_number}) — salon filtr almashtirildi&#10;📅 {date} {time} · 🏁 {km} km"></textarea>
                 <div class="tmpl-actions">
-                  <button type="button" class="btn-tmpl-save" onclick="saveTemplate('cabin_filter_message','sms-cabin-filter-message')">💾 Shablonni saqlash</button>
+                  <button type="button" class="btn-tmpl-edit" onclick="openEditor('cabin_filter_message','sms-cabin-filter-message','🌬️ Salon Filtr shabloni')">✏️ Tahrirlash</button>
+                  <button type="button" class="btn-tmpl-save" onclick="saveTemplate('cabin_filter_message','sms-cabin-filter-message')">💾 Saqlash</button>
                   <button type="button" class="btn-tmpl-test" onclick="testTemplate('cabin_filter_message','sms-cabin-filter-message')">📤 Test SMS</button>
                 </div>
                 <div id="tmpl-result-cabin_filter_message" class="tmpl-result" style="display:none"></div>
@@ -358,7 +380,8 @@
                 <label>🔩 Moy Filtr</label>
                 <textarea id="sms-oil-filter-message" rows="3" placeholder="{car_name} ({car_number}) — moy filtr almashtirildi&#10;📅 {date} {time} · 🏁 {km} km"></textarea>
                 <div class="tmpl-actions">
-                  <button type="button" class="btn-tmpl-save" onclick="saveTemplate('oil_filter_message','sms-oil-filter-message')">💾 Shablonni saqlash</button>
+                  <button type="button" class="btn-tmpl-edit" onclick="openEditor('oil_filter_message','sms-oil-filter-message','🔩 Moy Filtr shabloni')">✏️ Tahrirlash</button>
+                  <button type="button" class="btn-tmpl-save" onclick="saveTemplate('oil_filter_message','sms-oil-filter-message')">💾 Saqlash</button>
                   <button type="button" class="btn-tmpl-test" onclick="testTemplate('oil_filter_message','sms-oil-filter-message')">📤 Test SMS</button>
                 </div>
                 <div id="tmpl-result-oil_filter_message" class="tmpl-result" style="display:none"></div>
@@ -371,6 +394,51 @@
     </section>
 
   </main>
+
+  <!-- SHABLON EDITOR MODAL -->
+  <div id="editor-modal" class="emod" style="display:none">
+    <div class="emod-overlay" onclick="closeEditor()"></div>
+    <div class="emod-panel">
+      <div class="emod-header">
+        <span id="emod-title" class="emod-title">Shablonni Tahrirlash</span>
+        <button class="emod-close" onclick="closeEditor()">✕</button>
+      </div>
+
+      <!-- O'zgaruvchilar chip-lari -->
+      <div class="emod-vars">
+        <span class="emod-vars-label">O'zgaruvchilar — bosing qo'shish uchun:</span>
+        <div class="emod-chips">
+          <button type="button" class="evar-chip" onclick="insertVar('{car_name}')">{car_name}</button>
+          <button type="button" class="evar-chip" onclick="insertVar('{car_number}')">{car_number}</button>
+          <button type="button" class="evar-chip" onclick="insertVar('{km}')">{km}</button>
+          <button type="button" class="evar-chip" onclick="insertVar('{date}')">{date}</button>
+          <button type="button" class="evar-chip" onclick="insertVar('{time}')">{time}</button>
+          <button type="button" class="evar-chip" onclick="insertVar('{services}')">{services}</button>
+          <button type="button" class="evar-chip" onclick="insertVar('{oil_brand}')">{oil_brand}</button>
+          <button type="button" class="evar-chip" onclick="insertVar('{service_label}')">{service_label}</button>
+        </div>
+      </div>
+
+      <!-- Asosiy textarea -->
+      <textarea id="emod-textarea" class="emod-textarea" placeholder="SMS matni..."></textarea>
+
+      <!-- Preview -->
+      <div class="emod-preview-wrap">
+        <div class="emod-preview-label">Ko'rinish:</div>
+        <div id="emod-preview" class="emod-preview"></div>
+      </div>
+
+      <!-- Amallar -->
+      <div class="emod-footer">
+        <button type="button" class="emod-btn-reset" onclick="resetEditorToDefault()">↩ Asliga qaytarish</button>
+        <div style="display:flex;gap:10px">
+          <button type="button" class="emod-btn-test" id="emod-btn-test" onclick="editorTestSms()">📤 Test SMS</button>
+          <button type="button" class="emod-btn-save" id="emod-btn-save" onclick="editorSave()">💾 Saqlash</button>
+        </div>
+      </div>
+      <div id="emod-result" class="tmpl-result" style="display:none;margin:0 20px 16px"></div>
+    </div>
+  </div>
 
   <!-- SETTINGS -->
   <div id="settings-panel" class="sp">
