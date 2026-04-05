@@ -6,9 +6,11 @@
 const FIREBASE_URL = 'https://gilamuz-8308f-default-rtdb.firebaseio.com';
 
 // ── BACKEND API URL ──────────────────────────────────────────────
-// Node.js server.js ishga tushirilgandan keyin shu URL ishlatiladi.
-// Agar backend yo'q bo'lsa — eski to'g'ridan-to'g'ri devsms yo'l ishlatiladi.
-const BACKEND_URL = 'http://localhost:3001';
+// Avtomatik aniqlash: agar localhost bo'lsa — 3001 port,
+// aks holda — joriy sayt manzili (production deploy uchun).
+const BACKEND_URL = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+  ? `http://${location.hostname}:3001`
+  : `${location.protocol}//${location.host}`;
 
 // ===== LOCAL DB =====
 const DB = {
@@ -527,10 +529,11 @@ function buildSaveSmsText(car, checkedKeys) {
 // BACKEND_URL ishlayotgan bo'lsa — /api/sms/send endpoint orqali ketadi.
 // Aks holda to'g'ridan-to'g'ri devsms.uz ga murojaat qiladi.
 
-async function sendSms(text, phone) {
+async function sendSms(text, phone, logMeta = {}) {
   const token = smsConfig.devsms_token;
   if (!token || !phone) {
     console.log(`📤 SMS (token yo'q) → ${phone}\n${text}`);
+    addSmsLog({ ok: false, phone, message: text, error: "Token yoki telefon raqam yo'q", ...logMeta });
     return { ok: false };
   }
 
@@ -540,11 +543,12 @@ async function sendSms(text, phone) {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ token, phone, message: text }),
-      signal:  AbortSignal.timeout(4000), // 4s timeout
+      signal:  AbortSignal.timeout(4000),
     });
     if (r.ok) {
       const data = await r.json().catch(() => ({}));
       console.log('📡 Backend SMS javob:', data);
+      addSmsLog({ ok: true, phone, message: text, via: '🖥️ Backend', ...logMeta });
       return data;
     }
   } catch (e) {
@@ -559,12 +563,62 @@ async function sendSms(text, phone) {
       body:    JSON.stringify({ phone: phone.replace(/\D/g, ''), message: text }),
     });
     const data = await r.json().catch(() => ({}));
+    const isOk = r.ok || data?.status === 'success' || data?.message_id;
     console.log('DevSMS fallback javob:', data);
-    return data;
+    addSmsLog({ ok: isOk, phone, message: text, via: '📡 DevSMS direct', error: isOk ? undefined : JSON.stringify(data), ...logMeta });
+    return { ok: isOk, ...data };
   } catch (e) {
     console.warn('SMS xatosi (fallback):', e);
+    addSmsLog({ ok: false, phone, message: text, error: e.message, ...logMeta });
     return { ok: false };
   }
+}
+
+// ===== SMS LOG TIZIMI =====
+// Yuborilgan/xato SMS larni UI da ko'rsatish uchun
+const SMS_LOG_KEY = 'sms_log';
+const SMS_LOG_MAX = 50; // Maksimum 50 ta log saqlash
+
+function addSmsLog(entry) {
+  // entry: { ok, phone, message, service, car_name, error, via }
+  const log = DB.get(SMS_LOG_KEY, []);
+  log.unshift({
+    ...entry,
+    time: new Date().toLocaleString('uz-UZ'),
+    ts: Date.now(),
+  });
+  // Maksimum hajmni saqlash
+  if (log.length > SMS_LOG_MAX) log.splice(SMS_LOG_MAX);
+  DB.set(SMS_LOG_KEY, log);
+  // Agar SMS log paneli ochiq bo'lsa — yangilash
+  renderSmsLog();
+}
+
+function renderSmsLog() {
+  const el = document.getElementById('sms-log-list');
+  if (!el) return;
+  const log = DB.get(SMS_LOG_KEY, []);
+  if (log.length === 0) {
+    el.innerHTML = '<div class="sms-log-empty">📭 Hozircha SMS yuborilmagan</div>';
+    return;
+  }
+  el.innerHTML = log.map(e => `
+    <div class="sms-log-item ${e.ok ? 'sms-log-ok' : 'sms-log-fail'}">
+      <div class="sms-log-header">
+        <span class="sms-log-status">${e.ok ? '✅ Yuborildi' : '❌ Xato'}</span>
+        <span class="sms-log-phone">📱 ${e.phone || '—'}</span>
+        <span class="sms-log-time">🕐 ${e.time}</span>
+        ${e.via ? `<span class="sms-log-via">${e.via}</span>` : ''}
+      </div>
+      ${e.car_name ? `<div class="sms-log-car">🚗 ${e.car_name}${e.service ? ' · ' + e.service : ''}</div>` : ''}
+      <div class="sms-log-msg">${escHtml(e.message || '')}${e.error ? `\n❌ Xato: ${escHtml(e.error)}` : ''}</div>
+    </div>
+  `).join('');
+}
+
+function clearSmsLog() {
+  DB.set(SMS_LOG_KEY, []);
+  renderSmsLog();
 }
 
 // ===== AVTOMATIK TEKSHIRUV =====
@@ -598,7 +652,7 @@ async function autoCheckAndSend() {
         const tplKey   = svc.key + '_message';
         const tmpl     = smsConfig[tplKey] || DEFAULT_SMS[tplKey] || DEFAULT_SMS.default_change_message;
         const text     = fillTemplate(tmpl, car, svc.key).replace(/{service_label}/g, svcLabel);
-        await sendSms(text, car.phone_number);
+        await sendSms(text, car.phone_number, { car_name: car.car_name, service: svcLabel + ' (avtomatik)' });
         markSentToday(car.id, svc.key);
         smsConfig.sms_sent_count = (smsConfig.sms_sent_count || 0) + 1;
         saveSms();
@@ -724,7 +778,153 @@ function deleteOil(id) {
   loadOilsPage(); renderOilSel('oil-name');
 }
 
-// ===== SMS PAGE =====
+
+// ===== SMS TAB TIZIMI =====
+function switchSmsTab(tab, btn) {
+  document.querySelectorAll('.sms-tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.sms-tab-content').forEach(c => c.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  const el = document.getElementById('sms-tab-' + tab);
+  if (el) el.classList.add('active');
+  // Log tabiga o'tganda yangilash
+  if (tab === 'logs') renderSmsLog();
+}
+
+// Token ko'rish/yashirish
+function toggleTokenVisibility() {
+  const inp = document.getElementById('devsms-token');
+  const eye = document.getElementById('token-eye');
+  if (!inp) return;
+  inp.type = inp.type === 'password' ? 'text' : 'password';
+  if (eye) eye.textContent = inp.type === 'password' ? '👁️' : '🙈';
+}
+
+// Backend va Firebase holatini tekshirish
+async function checkBackendStatus() {
+  const backendEl  = document.getElementById('sms-backend-status');
+  const firebaseEl = document.getElementById('sms-firebase-status');
+  if (backendEl)  { backendEl.textContent  = '⏳...'; backendEl.style.color  = 'var(--text2)'; }
+  if (firebaseEl) { firebaseEl.textContent = '⏳...'; firebaseEl.style.color = 'var(--text2)'; }
+  // Backend
+  try {
+    const r = await fetch(`${BACKEND_URL}/health`, { signal: AbortSignal.timeout(4000) });
+    const d = await r.json().catch(() => ({}));
+    if (backendEl) {
+      backendEl.textContent  = r.ok ? '✅ Ulangan' : '❌ Xato';
+      backendEl.style.color  = r.ok ? 'var(--success)' : 'var(--danger)';
+    }
+  } catch(e) {
+    if (backendEl) { backendEl.textContent = '❌ Ulangan emas'; backendEl.style.color = 'var(--danger)'; }
+  }
+  // Firebase
+  try {
+    const r = await FB.get('_ping');
+    if (firebaseEl) {
+      firebaseEl.textContent = r.ok ? '✅ Ulangan' : '❌ Xato';
+      firebaseEl.style.color = r.ok ? 'var(--success)' : 'var(--danger)';
+    }
+  } catch(e) {
+    if (firebaseEl) { firebaseEl.textContent = '❌ Xato'; firebaseEl.style.color = 'var(--danger)'; }
+  }
+}
+
+// Tezkor SMS yuborish
+async function quickSendSms() {
+  const phone   = document.getElementById('quick-sms-phone')?.value?.trim();
+  const message = document.getElementById('quick-sms-text')?.value?.trim();
+  const resultEl = document.getElementById('quick-sms-result');
+
+  if (!smsConfig.devsms_token) {
+    showTmplResult(resultEl, 'fail', '❌ Avval DevSMS token kiriting (Sozlama tabidan)');
+    return;
+  }
+  if (!phone) { showTmplResult(resultEl, 'fail', '❌ Telefon raqam kiriting'); return; }
+  if (!message) { showTmplResult(resultEl, 'fail', '❌ Xabar matni kiriting'); return; }
+
+  showTmplResult(resultEl, 'loading', `⏳ ${phone} ga yuborilmoqda...`);
+  try {
+    const r = await fetch(`${BACKEND_URL}/api/sms/send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: smsConfig.devsms_token, phone, message }),
+      signal: AbortSignal.timeout(10000),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (data.ok) {
+      showTmplResult(resultEl, 'ok', `✅ SMS yuborildi → ${phone}\n<div class="preview">${escHtml(message)}</div>`);
+      addSmsLog({ ok: true, phone, message, via: '⚡ Tezkor' });
+      smsConfig.sms_sent_count = (smsConfig.sms_sent_count || 0) + 1;
+      saveSms(); updateSmsStats();
+      document.getElementById('quick-sms-text').value = '';
+    } else {
+      showTmplResult(resultEl, 'fail', `❌ Xato: ${data.error || JSON.stringify(data.devsms || {})}`);
+      addSmsLog({ ok: false, phone, message, via: '⚡ Tezkor', error: data.error });
+    }
+  } catch(e) {
+    // Fallback
+    const res = await sendSms(message, phone, { via: '⚡ Tezkor (fallback)' });
+    if (res?.ok !== false) {
+      showTmplResult(resultEl, 'ok', `✅ SMS yuborildi (fallback) → ${phone}`);
+    } else {
+      showTmplResult(resultEl, 'fail', `❌ ${e.message || 'SMS yuborilmadi'}`);
+    }
+  }
+}
+
+// SMS statistikasini yangilash
+function updateSmsStats() {
+  const log = DB.get(SMS_LOG_KEY, []);
+  const today = new Date().toDateString();
+  const todayCount = log.filter(e => new Date(e.ts || 0).toDateString() === today).length;
+  const failCount  = log.filter(e => !e.ok).length;
+  const sentEl  = document.getElementById('sms-sent-count');
+  const todayEl = document.getElementById('sms-stat-today');
+  const failEl  = document.getElementById('sms-stat-fail');
+  if (sentEl)  sentEl.textContent  = (smsConfig.sms_sent_count || 0).toLocaleString();
+  if (todayEl) todayEl.textContent = todayCount;
+  if (failEl)  failEl.textContent  = failCount;
+}
+
+// SMS page header status
+function updateSmsHeaderStatus() {
+  const el = document.getElementById('sms-header-status');
+  if (!el) return;
+  if (smsConfig.enabled && smsConfig.devsms_token) {
+    el.textContent = '✅ SMS faol — ' + (smsConfig.sms_sent_count || 0) + ' ta yuborilgan';
+    el.style.color = 'var(--success)';
+  } else if (!smsConfig.devsms_token) {
+    el.textContent = '⚠️ Token kiritilmagan';
+    el.style.color = 'var(--warning)';
+  } else {
+    el.textContent = '❌ SMS o\'chirilgan';
+    el.style.color = 'var(--danger)';
+  }
+}
+
+// Token tekshirish
+async function verifyToken() {
+  const token  = document.getElementById('devsms-token')?.value?.trim();
+  const resEl  = document.getElementById('token-verify-result');
+  if (!token) { showTmplResult(resEl, 'fail', '❌ Token kiriting'); return; }
+  showTmplResult(resEl, 'loading', '⏳ Token tekshirilmoqda...');
+  try {
+    const r = await fetch(`${BACKEND_URL}/api/sms/verify-token`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }), signal: AbortSignal.timeout(7000),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (d.ok) {
+      const bal = d.balance !== undefined ? ` · Balans: ${d.balance}` : '';
+      showTmplResult(resEl, 'ok', `✅ Token to'g'ri${bal}`);
+    } else {
+      showTmplResult(resEl, 'fail', `❌ Token xato yoki muddati o'tgan`);
+    }
+  } catch(e) {
+    showTmplResult(resEl, 'fail', `❌ Tekshirib bo'lmadi: ${e.message}`);
+  }
+}
+
+// SMS PAGE =====
 function loadSmsPage() {
   document.getElementById('devsms-token').value        = smsConfig.devsms_token  || '';
   document.getElementById('sms-enabled').checked       = !!smsConfig.enabled;
@@ -754,105 +954,25 @@ function loadSmsPage() {
   }
 
   const ae = document.getElementById('sms-api-status');
-  ae.textContent = smsConfig.devsms_token ? '✅ Token kiritilgan' : '❌ Token kiritilmagan';
-  ae.style.color = smsConfig.devsms_token ? 'var(--success)' : 'var(--danger)';
+  if (ae) {
+    ae.textContent = smsConfig.devsms_token ? '✅ Token kiritilgan' : '❌ Token kiritilmagan';
+    ae.style.color = smsConfig.devsms_token ? 'var(--success)' : 'var(--danger)';
+  }
 
   const card = document.getElementById('sms-status-card');
   const el   = document.getElementById('sms-status');
   if (smsConfig.enabled && smsConfig.devsms_token) { el.textContent = '✅ SMS faol'; card.classList.add('on'); }
   else if (!smsConfig.devsms_token)                { el.textContent = '⚠️ DevSMS token kiritilmagan'; card.classList.remove('on'); }
   else                                              { el.textContent = '❌ SMS o\'chirilgan'; card.classList.remove('on'); }
+
+  updateSmsStats();
+  updateSmsHeaderStatus();
+  // Backend va Firebase holatini asinxron tekshiramiz
+  setTimeout(checkBackendStatus, 300);
 }
-// ── DevSMS token tekshirish ──────────────────────────────────────
-async function testDevsmsToken() {
-  const btn    = document.getElementById('btn-test-token');
-  const resEl  = document.getElementById('token-test-result');
-  const token  = document.getElementById('devsms-token').value.trim();
-
-  if (!token) {
-    resEl.style.display = 'block';
-    resEl.className = 'supa-result fail';
-    resEl.innerHTML = '❌ Token kiritilmagan';
-    return;
-  }
-
-  btn.className = 'btn-test-supa loading';
-  btn.innerHTML = '<span class="spin">⏳</span> Tekshirilmoqda...';
-  btn.disabled  = true;
-  resEl.style.display = 'block';
-  resEl.className = 'supa-result loading';
-  resEl.innerHTML = '⏳ DevSMS API ga ulanmoqda...';
-
-  // Backend orqali yoki to'g'ridan devsms ga ping
-  let ok = false, detail = '';
-  try {
-    // Backend orqali tekshirish
-    const r = await fetch(`${BACKEND_URL}/api/sms/check-token`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ token }),
-      signal:  AbortSignal.timeout(8000),
-    });
-    const data = await r.json().catch(() => ({}));
-    ok     = data.ok === true;
-    detail = data.message || data.error || JSON.stringify(data);
-  } catch(e) {
-    // Fallback: to'g'ridan devsms balance/info endpoint
-    try {
-      const r = await fetch('https://devsms.uz/api/user.php', {
-        method:  'GET',
-        headers: { 'Authorization': 'Bearer ' + token },
-        signal:  AbortSignal.timeout(8000),
-      });
-      const data = await r.json().catch(() => ({}));
-      ok     = r.ok && !data.error;
-      detail = data.balance !== undefined
-        ? `Balans: ${data.balance} so'm`
-        : (data.message || data.error || `HTTP ${r.status}`);
-    } catch(e2) {
-      ok     = false;
-      detail = 'Tarmoq xatosi: ' + e2.message;
-    }
-  }
-
-  if (ok) {
-    btn.className = 'btn-test-supa ok';
-    btn.innerHTML = '✅ Token ishlayapti';
-    resEl.className = 'supa-result ok';
-    resEl.innerHTML = "✅ <strong>Token to\u02BCg\u02BCri!</strong>" +
-      (detail ? `<br><span style="font-size:12px">${detail}</span>` : '');
-  } else {
-    btn.className = 'btn-test-supa fail';
-    btn.innerHTML = '❌ Token xato';
-    resEl.className = 'supa-result fail';
-    resEl.innerHTML = "❌ <strong>Token ishlamadi!</strong>" +
-      (detail ? `<br><span style="font-size:12px">${detail}</span>` : '');
-  }
-
-  btn.disabled = false;
-  setTimeout(() => {
-    btn.className = 'btn-test-supa';
-    btn.innerHTML = '🔍 Token tekshirish';
-    resEl.style.display = 'none';
-  }, 8000);
-}
-
-// ── SMS sozlamalarini saqlash — to'liq xato tekshiruv bilan ─────
-document.getElementById('sms-config-form').addEventListener('submit', async e => {
+document.getElementById('sms-config-form').addEventListener('submit', e => {
   e.preventDefault();
-
-  const submitBtn = document.getElementById('btn-sms-submit');
-  const saveResEl = document.getElementById('sms-save-result');
-
-  // Tugmani loading holatiga
-  submitBtn.disabled  = true;
-  submitBtn.innerHTML = '<span class="spin">⏳</span> Saqlanmoqda...';
-  saveResEl.style.display = 'none';
-
-  // Formadan qiymatlarni o'qish
-  const token = document.getElementById('devsms-token').value.trim();
-
-  smsConfig.devsms_token         = token;
+  smsConfig.devsms_token         = document.getElementById('devsms-token').value.trim();
   smsConfig.enabled              = document.getElementById('sms-enabled').checked;
   smsConfig.firebase_enabled     = document.getElementById('firebase-enabled')?.checked ?? true;
   smsConfig.save_message         = document.getElementById('sms-save-message').value;
@@ -862,76 +982,11 @@ document.getElementById('sms-config-form').addEventListener('submit', async e =>
   smsConfig.air_filter_message   = document.getElementById('sms-air-filter-message').value;
   smsConfig.cabin_filter_message = document.getElementById('sms-cabin-filter-message').value;
   smsConfig.oil_filter_message   = document.getElementById('sms-oil-filter-message').value;
-
-  // 1) LOCAL ga saqlash (har doim)
   saveSms();
-
-  // 2) Backend → Firebase ga saqlash va natijasini tekshirish
-  let savedOk  = false;
-  let savedWhere = '';
-  let savedError = '';
-
-  try {
-    const r = await fetch(`${BACKEND_URL}/api/sms-config`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify(smsConfig),
-      signal:  AbortSignal.timeout(6000),
-    });
-    const data = await r.json().catch(() => ({}));
-    if (r.ok && data.ok !== false) {
-      savedOk    = true;
-      savedWhere = 'Backend + Firebase';
-    } else {
-      savedError = data.error || `Backend HTTP ${r.status}`;
-    }
-  } catch(e) {
-    savedError = 'Backend yoq (' + e.message + ')';
-  }
-
-  // Backend ishlamagan bo'lsa — to'g'ridan Firebase
-  if (!savedOk) {
-    try {
-      const fbR = await FB.put('sms_config', smsConfig);
-      if (fbR.ok) {
-        savedOk    = true;
-        savedWhere = 'Firebase (backend yo\'q — fallback)';
-      } else {
-        savedError = 'Firebase HTTP ' + (fbR.status || 'xato');
-      }
-    } catch(e) {
-      savedError = (savedError ? savedError + ' | ' : '') + 'Firebase: ' + e.message;
-    }
-  }
-
-  // 3) Tugma va natija holati
-  if (savedOk) {
-    submitBtn.innerHTML = '✅ Saqlandi';
-    submitBtn.style.background = 'var(--success)';
-    saveResEl.className = 'supa-result ok';
-    saveResEl.style.display = 'block';
-    saveResEl.innerHTML = `✅ <strong>SMS sozlamalari saqlandi!</strong><br>
-      <span style="font-size:12px">Saqlangan joy: ${savedWhere}</span>`;
-    startAutoCheck();
-    loadSmsPage();
-    showToast('✅ SMS sozlamalari saqlandi!', 'success');
-  } else {
-    submitBtn.innerHTML = '❌ Saqlashda xato';
-    submitBtn.style.background = 'var(--danger)';
-    saveResEl.className = 'supa-result fail';
-    saveResEl.style.display = 'block';
-    saveResEl.innerHTML = `❌ <strong>Saqlashda xato yuz berdi!</strong><br>
-      <span style="font-size:12px">Sabab: ${savedError}</span><br>
-      <span style="font-size:12px">⚠️ Sozlamalar faqat qurilmada saqlandi (local)</span>`;
-    showToast('❌ Saqlashda xato! Local saqlanddi.', 'error');
-  }
-
-  setTimeout(() => {
-    submitBtn.disabled = false;
-    submitBtn.innerHTML = '💾 Saqlash va Ishga Tushurish';
-    submitBtn.style.background = '';
-    saveResEl.style.display = 'none';
-  }, 6000);
+  fbSaveSmsConfig(); // ← Firebase ga barcha shablonlar bilan saqlash
+  startAutoCheck();
+  showToast('✅ SMS sozlamalari saqlandi!', 'success');
+  loadSmsPage();
 });
 function resetSmsCount() {
   if (!confirm('Hisoblagichni nolga tiklaysizmi?')) return;
