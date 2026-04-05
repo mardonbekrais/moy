@@ -799,6 +799,17 @@ function toggleTokenVisibility() {
   if (eye) eye.textContent = inp.type === 'password' ? '👁️' : '🙈';
 }
 
+// Token o'zgarganda eski natijani tozalaymiz
+(function() {
+  const tokenInp = document.getElementById('devsms-token');
+  if (tokenInp) {
+    tokenInp.addEventListener('input', () => {
+      const resEl = document.getElementById('token-verify-result');
+      if (resEl) resEl.style.display = 'none';
+    });
+  }
+})();
+
 // Backend va Firebase holatini tekshirish
 async function checkBackendStatus() {
   const backendEl  = document.getElementById('sms-backend-status');
@@ -905,22 +916,56 @@ function updateSmsHeaderStatus() {
 async function verifyToken() {
   const token  = document.getElementById('devsms-token')?.value?.trim();
   const resEl  = document.getElementById('token-verify-result');
+  const btn    = document.querySelector('[onclick="verifyToken()"]');
   if (!token) { showTmplResult(resEl, 'fail', '❌ Token kiriting'); return; }
   showTmplResult(resEl, 'loading', '⏳ Token tekshirilmoqda...');
+  if (btn) setBtnState(btn, 'loading', '⏳ Tekshirilmoqda...');
+
+  // Balansni formatlash yordamchisi
+  function fmtBalance(data) {
+    // devsms.uz turli formatlarda qaytarishi mumkin
+    const bal = data?.balance ?? data?.data?.balance ?? data?.amount ?? data?.data?.amount;
+    if (bal === undefined || bal === null) return '';
+    return ` · 💰 Balans: ${Number(bal).toLocaleString()} so'm`;
+  }
+
+  // ── 1) Backend orqali urinish ─────────────────────────────
   try {
     const r = await fetch(`${BACKEND_URL}/api/sms/verify-token`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token }), signal: AbortSignal.timeout(7000),
+      body: JSON.stringify({ token }), signal: AbortSignal.timeout(5000),
     });
-    const d = await r.json().catch(() => ({}));
-    if (d.ok) {
-      const bal = d.balance !== undefined ? ` · Balans: ${d.balance}` : '';
-      showTmplResult(resEl, 'ok', `✅ Token to'g'ri${bal}`);
+    if (r.ok) {
+      const d = await r.json().catch(() => ({}));
+      if (btn) setBtnState(btn, '', '🔍 Token Tekshirish');
+      if (d.ok) {
+        showTmplResult(resEl, 'ok', `✅ Token to'g'ri${fmtBalance(d)}`);
+      } else {
+        showTmplResult(resEl, 'fail', `❌ Token xato yoki muddati o'tgan`);
+      }
+      return;
+    }
+  } catch(e) {
+    console.warn('⚠️ Backend verify ishlamadi, fallback:', e.message);
+  }
+
+  // ── 2) Fallback: to'g'ridan devsms.uz ga ─────────────────
+  try {
+    const r2 = await fetch('https://devsms.uz/api/balance.php', {
+      method: 'GET',
+      headers: { 'Authorization': 'Bearer ' + token },
+      signal: AbortSignal.timeout(7000),
+    });
+    const d2 = await r2.json().catch(() => ({}));
+    if (btn) setBtnState(btn, '', '🔍 Token Tekshirish');
+    if (r2.ok && (d2?.balance !== undefined || d2?.status === 'success' || d2?.amount !== undefined)) {
+      showTmplResult(resEl, 'ok', `✅ Token to'g'ri${fmtBalance(d2)}`);
     } else {
       showTmplResult(resEl, 'fail', `❌ Token xato yoki muddati o'tgan`);
     }
-  } catch(e) {
-    showTmplResult(resEl, 'fail', `❌ Tekshirib bo'lmadi: ${e.message}`);
+  } catch(e2) {
+    if (btn) setBtnState(btn, '', '🔍 Token Tekshirish');
+    showTmplResult(resEl, 'fail', `❌ Tekshirib bo'lmadi: server yoki internet muammosi`);
   }
 }
 
@@ -970,8 +1015,13 @@ function loadSmsPage() {
   // Backend va Firebase holatini asinxron tekshiramiz
   setTimeout(checkBackendStatus, 300);
 }
-document.getElementById('sms-config-form').addEventListener('submit', e => {
+document.getElementById('sms-config-form').addEventListener('submit', async e => {
   e.preventDefault();
+  const saveBtn = e.target.querySelector('[type="submit"]');
+
+  // ── Loading holati ──
+  if (saveBtn) setBtnState(saveBtn, 'loading', '⏳ Saqlanmoqda...');
+
   smsConfig.devsms_token         = document.getElementById('devsms-token').value.trim();
   smsConfig.enabled              = document.getElementById('sms-enabled').checked;
   smsConfig.firebase_enabled     = document.getElementById('firebase-enabled')?.checked ?? true;
@@ -982,9 +1032,35 @@ document.getElementById('sms-config-form').addEventListener('submit', e => {
   smsConfig.air_filter_message   = document.getElementById('sms-air-filter-message').value;
   smsConfig.cabin_filter_message = document.getElementById('sms-cabin-filter-message').value;
   smsConfig.oil_filter_message   = document.getElementById('sms-oil-filter-message').value;
+
+  // ── Lokal saqlash ──
   saveSms();
-  fbSaveSmsConfig(); // ← Firebase ga barcha shablonlar bilan saqlash
+
+  // ── Firebase ga saqlash (async, xato bo'lsa ham davom etadi) ──
+  try {
+    await fbSaveSmsConfig();
+  } catch(err) {
+    console.warn('Firebase saqlashda xato:', err);
+  }
+
   startAutoCheck();
+
+  // ── Token bo'lsa — balansni avtomatik tekshiramiz ──
+  if (smsConfig.devsms_token) {
+    const resEl = document.getElementById('token-verify-result');
+    if (resEl) {
+      showTmplResult(resEl, 'loading', '⏳ Token tekshirilmoqda...');
+      // Orqa fonda tekshiramiz (bloklamaslik uchun)
+      verifyToken().catch(() => {});
+    }
+  }
+
+  // ── Tugmani tiklash ──
+  if (saveBtn) {
+    setBtnState(saveBtn, 'ok', '✅ Saqlandi!');
+    setTimeout(() => setBtnState(saveBtn, '', '✅ Saqlash va Ishga Tushurish'), 2500);
+  }
+
   showToast('✅ SMS sozlamalari saqlandi!', 'success');
   loadSmsPage();
 });

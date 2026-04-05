@@ -159,6 +159,8 @@ body{font-family:'DM Sans',-apple-system,sans-serif;background:var(--bg);color:v
 /* ===== BUTTONS ===== */
 .bsub{width:100%;padding:15px;background:linear-gradient(135deg,var(--primary),var(--pl));border:none;border-radius:var(--rs);color:#fff;font-size:15px;font-weight:700;font-family:'Syne',sans-serif;letter-spacing:.5px;cursor:pointer;transition:all .2s;margin-top:4px;box-shadow:0 4px 18px rgba(108,99,255,.3)}
 .bsub:active{transform:scale(.98);opacity:.9}
+.bsub.loading{opacity:.7;pointer-events:none;background:linear-gradient(135deg,var(--text2),var(--border2))}
+.bsub.ok{background:linear-gradient(135deg,var(--success),#27ae60);box-shadow:0 4px 18px rgba(39,174,96,.3)}
 .btn{padding:13px 16px;border:none;border-radius:var(--rs);font-size:14px;font-weight:600;font-family:inherit;cursor:pointer;transition:all .18s;width:100%}
 .bp{background:var(--primary);color:#fff}.bs{background:var(--success);color:#fff}.bd{background:var(--danger);color:#fff}
 .btn:active{transform:scale(.98)}
