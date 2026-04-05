@@ -614,7 +614,7 @@ function startAutoCheck() {
 }
 
 // ===== ADD CAR =====
-document.getElementById('add-car-form').addEventListener('submit', e => {
+document.getElementById('add-car-form').addEventListener('submit', async e => {
   e.preventDefault();
   const km   = parseInt(document.getElementById('current-km').value) || 0;
   const name = document.getElementById('car-name').value.trim();
@@ -657,8 +657,34 @@ document.getElementById('add-car-form').addEventListener('submit', e => {
   fbSaveCar(car); // Firebase ga saqlash
 
   if (smsConfig.enabled && smsConfig.devsms_token && car.phone_number) {
-    const smsText = buildSaveSmsText(car, checkedKeys);
-    sendSms(smsText, car.phone_number);
+    // ── Backend orqali "mashina saqlash" SMS — Firebase dagi shablon bilan ──
+    let smsSent = false;
+    try {
+      const r = await fetch(`${BACKEND_URL}/api/sms/car-saved`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          token:        smsConfig.devsms_token,
+          car:          { ...car },
+          checked_keys: checkedKeys,
+        }),
+        signal: AbortSignal.timeout(8000),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (data.ok) {
+        smsSent = true;
+        console.log('📡 Backend car-saved SMS yuborildi:', data.text);
+      }
+    } catch(e) {
+      console.warn('⚠️ Backend car-saved ishlamadi, fallback:', e.message);
+    }
+
+    // ── Fallback: local shablon bilan ──────────────────────────
+    if (!smsSent) {
+      const smsText = buildSaveSmsText(car, checkedKeys);
+      await sendSms(smsText, car.phone_number);
+    }
+
     smsConfig.sms_sent_count = (smsConfig.sms_sent_count || 0) + 1;
     saveSms(); fbSaveSmsConfig();
     showToast('✅ Saqlandi · SMS yuborildi!', 'success');
@@ -747,7 +773,187 @@ function resetSmsCount() {
   if (!confirm('Hisoblagichni nolga tiklaysizmi?')) return;
   smsConfig.sms_sent_count = 0; saveSms();
   fbSaveSmsConfig(); // ← Firebase ga yangilash
+
   showToast('✅ Tiklandi', 'success'); loadSmsPage();
+}
+
+// ===== SHABLON: ALOHIDA SAQLASH =====
+// Har bir shablon yonidagi "💾 Shablonni saqlash" tugmasi
+// shu funksiyani chaqiradi. Backend ga saqlaydi → Firebase ga yozadi.
+async function saveTemplate(templateKey, textareaId) {
+  const btn = document.querySelector(`[onclick="saveTemplate('${templateKey}','${textareaId}')"]`);
+  const resultEl = document.getElementById('tmpl-result-' + templateKey);
+  const value = document.getElementById(textareaId)?.value?.trim();
+
+  if (!value) {
+    showTmplResult(resultEl, 'fail', "❌ Shablon bo'sh — matn kiriting");
+    return;
+  }
+
+  // Tugmani loading holatiga o'tkaz
+  setBtnState(btn, 'loading', '⏳ Saqlanmoqda...');
+  showTmplResult(resultEl, 'loading', '⏳ Backend ga yuborilmoqda...');
+
+  // Local state ga yoz
+  smsConfig[templateKey] = value;
+  saveSms();
+
+  // Backend → Firebase ga saqlash
+  let savedViaBackend = false;
+  try {
+    const payload = { ...smsConfig };
+    payload[templateKey] = value;
+
+    const r = await fetch(`${BACKEND_URL}/api/sms-config`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(payload),
+      signal:  AbortSignal.timeout(5000),
+    });
+    if (r.ok) {
+      const data = await r.json();
+      savedViaBackend = true;
+      setBtnState(btn, 'ok', '✅ Saqlandi');
+      showTmplResult(resultEl, 'ok',
+        `✅ Shablon backend + Firebase ga saqlandi.
+` +
+        `<div class="preview">${escHtml(value)}</div>`
+      );
+    } else {
+      throw new Error('Backend ' + r.status);
+    }
+  } catch(e) {
+    // Fallback: to'g'ridan Firebase REST
+    const fbR = await FB.put('sms_config', { ...smsConfig });
+    if (fbR.ok) {
+      setBtnState(btn, 'ok', '✅ Saqlandi (Firebase)');
+      showTmplResult(resultEl, 'ok',
+        `✅ Shablon Firebase ga saqlandi (backend yo'q — fallback).
+` +
+        `<div class="preview">${escHtml(value)}</div>`
+      );
+    } else {
+      setBtnState(btn, 'fail', '❌ Xato');
+      showTmplResult(resultEl, 'fail', '❌ Saqlashda xato: ' + (e.message || "noma'lum"));
+    }
+  }
+  setTimeout(() => { setBtnState(btn, '', '💾 Shablonni saqlash'); }, 3000);
+}
+
+// ===== SHABLON: TEST SMS YUBORISH =====
+// Har bir shablon yonidagi "📤 Test SMS" tugmasi
+// backend dan joriy saqlangan shablonni olib, test uchun SMS yuboradi.
+async function testTemplate(templateKey, textareaId) {
+  const btn = document.querySelector(`[onclick="testTemplate('${templateKey}','${textareaId}')"]`);
+  const resultEl = document.getElementById('tmpl-result-' + templateKey);
+
+  // Token tekshir
+  if (!smsConfig.devsms_token) {
+    showTmplResult(resultEl, 'fail', "❌ Avval DevSMS token kiriting va saqlang");
+    return;
+  }
+
+  // Test uchun telefon raqami — birinchi mashinadan yoki tokendan
+  const testPhone = allCars.find(c => c.phone_number)?.phone_number;
+  if (!testPhone) {
+    showTmplResult(resultEl, 'fail', "❌ Test uchun telefon raqam topilmadi — avval mashina qo'shing (telefon bilan)");
+    return;
+  }
+
+  // Textarea dagi joriy matnni avval saqlaymiz (saqlashdan so'ng test qilish)
+  const currentText = document.getElementById(textareaId)?.value?.trim();
+  if (!currentText) {
+    showTmplResult(resultEl, 'fail', "❌ Shablon bo'sh — matn kiriting");
+    return;
+  }
+
+  setBtnState(btn, 'loading', '⏳ Yuborilmoqda...');
+  showTmplResult(resultEl, 'loading', `⏳ ${testPhone} raqamiga test SMS yuborilmoqda...`);
+
+  // Backend orqali test
+  try {
+    const testCar = allCars.find(c => c.phone_number) || {
+      car_name: 'Test Nexia', car_number: '01A 000AA',
+      total_km: 85000, oil_name: 'SAE 5W-30', phone_number: testPhone
+    };
+
+    const r = await fetch(`${BACKEND_URL}/api/sms/test`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        token:        smsConfig.devsms_token,
+        phone:        testPhone,
+        template_key: templateKey,
+        template_override: currentText,  // textarea dagi joriy matn
+        car:          testCar,
+      }),
+      signal: AbortSignal.timeout(10000),
+    });
+    const data = await r.json().catch(() => ({}));
+
+    if (data.ok) {
+      setBtnState(btn, 'ok', '✅ Yuborildi');
+      showTmplResult(resultEl, 'ok',
+        `✅ Test SMS yuborildi → ${testPhone}
+` +
+        `<div class="preview">${escHtml(data.text || currentText)}</div>`
+      );
+    } else {
+      setBtnState(btn, 'fail', '❌ Xato');
+      showTmplResult(resultEl, 'fail',
+        `❌ SMS yuborilmadi: ${data.error || JSON.stringify(data.devsms || {})}`
+      );
+    }
+  } catch(e) {
+    // Fallback: to'g'ridan devsms
+    const svcType  = templateKey.replace('_message','');
+    const svcLabel = SVC_META[svcType]?.label || svcType;
+    const text = currentText
+      .replace(/{car_name}/g,      allCars[0]?.car_name   || 'Test Nexia')
+      .replace(/{car_number}/g,    allCars[0]?.car_number || '01A 000AA')
+      .replace(/{km}/g,            (allCars[0]?.total_km  || 85000).toLocaleString())
+      .replace(/{date}/g,           nowDate())
+      .replace(/{time}/g,           nowTime())
+      .replace(/{oil_brand}/g,      allCars[0]?.oil_name  || 'SAE 5W-30')
+      .replace(/{services}/g,       svcLabel)
+      .replace(/{service_label}/g,  svcLabel);
+
+    const smsR = await sendSms(text, testPhone);
+    if (smsR && smsR.ok !== false) {
+      setBtnState(btn, 'ok', '✅ Yuborildi');
+      showTmplResult(resultEl, 'ok',
+        `✅ Test SMS yuborildi (fallback) → ${testPhone}
+<div class="preview">${escHtml(text)}</div>`
+      );
+    } else {
+      setBtnState(btn, 'fail', '❌ Xato');
+      showTmplResult(resultEl, 'fail', `❌ Xato: ${e.message || 'SMS yuborilmadi'}`);
+    }
+  }
+  setTimeout(() => { setBtnState(btn, '', '📤 Test SMS'); }, 5000);
+}
+
+// ── Yordamchi: tugma holati ─────────────────────────────────────
+function setBtnState(btn, cls, label) {
+  if (!btn) return;
+  btn.className = btn.className.replace(/\b(loading|ok|fail)\b/g, '').trim();
+  if (cls) btn.classList.add(cls);
+  btn.innerHTML = label;
+  btn.disabled  = cls === 'loading';
+}
+
+// ── Yordamchi: natija paneli ────────────────────────────────────
+function showTmplResult(el, cls, html) {
+  if (!el) return;
+  el.className   = 'tmpl-result ' + cls;
+  el.innerHTML   = html;
+  el.style.display = 'block';
+  setTimeout(() => { if (cls !== 'loading') el.style.display = 'none'; }, 7000);
+}
+
+// ── Yordamchi: HTML escape ──────────────────────────────────────
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 // ===== CAR MODAL =====
@@ -836,7 +1042,7 @@ document.getElementById('btn-update-km').addEventListener('click', () => {
   showToast('✅ Probeg yangilandi!', 'success'); openModal(); loadDashboard();
 });
 
-document.getElementById('btn-change-svc').addEventListener('click', () => {
+document.getElementById('btn-change-svc').addEventListener('click', async () => {
   const type    = document.getElementById('modal-svc-type').value;
   const oilName = document.getElementById('modal-oil-select').value || curCar.oil_name;
   const km      = parseInt(document.getElementById('modal-km').value) || curCar.total_km;
@@ -856,12 +1062,41 @@ document.getElementById('btn-change-svc').addEventListener('click', () => {
 
   if (smsConfig.enabled && smsConfig.devsms_token) {
     const svcLabel = SVC_META[type]?.label || type;
-    const tplKey   = type + '_message';
-    const tmpl     = smsConfig[tplKey] || DEFAULT_SMS[tplKey] || DEFAULT_SMS.default_change_message;
-    const filled   = fillTemplate(tmpl, curCar, type).replace(/{service_label}/g, svcLabel);
-    sendSms(filled, curCar.phone_number);
+
+    // ── Backend orqali SMS yuborish — shablon Firebase dagi versiyadan olinadi ──
+    let smsSent = false;
+    try {
+      const r = await fetch(`${BACKEND_URL}/api/sms/service-change`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          token:        smsConfig.devsms_token,
+          car:          { ...curCar },
+          service_type: type,
+        }),
+        signal: AbortSignal.timeout(8000),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (data.ok) {
+        smsSent = true;
+        console.log('📡 Backend service-change SMS yuborildi:', data.text);
+      } else {
+        console.warn('⚠️ Backend SMS xato:', data.error);
+      }
+    } catch(e) {
+      console.warn('⚠️ Backend ishlamadi, fallback:', e.message);
+    }
+
+    // ── Fallback: local shablon bilan to'g'ridan ──────────────
+    if (!smsSent) {
+      const tplKey = type + '_message';
+      const tmpl   = smsConfig[tplKey] || DEFAULT_SMS[tplKey] || DEFAULT_SMS.default_change_message;
+      const filled = fillTemplate(tmpl, curCar, type).replace(/{service_label}/g, svcLabel);
+      await sendSms(filled, curCar.phone_number);
+    }
+
     smsConfig.sms_sent_count = (smsConfig.sms_sent_count || 0) + 1;
-    saveSms(); fbSaveSmsConfig(); // ← SMS count Firebase ga
+    saveSms(); fbSaveSmsConfig();
     showToast('✅ ' + svcLabel + ' · SMS yuborildi!', 'success');
   } else {
     showToast('✅ ' + (SVC_META[type]?.label || 'Xizmat') + ' almashtirildi!', 'success');

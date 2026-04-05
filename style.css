@@ -290,3 +290,53 @@ body{font-family:'DM Sans',-apple-system,sans-serif;background:var(--bg);color:v
   .sp .sd{max-width:480px;left:50%;transform:translateX(-50%)}
   .modal .mc{max-width:480px;margin:auto}
 }
+
+/* ===== SHABLON TUGMALARI ===== */
+.tmpl-block{
+  margin-bottom:18px;
+  padding-bottom:16px;
+  border-bottom:1px solid var(--border);
+}
+.tmpl-block:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0}
+.tmpl-block label{
+  display:block;font-size:13px;font-weight:600;
+  color:var(--text2);margin-bottom:6px;
+}
+.tmpl-actions{
+  display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;
+}
+.btn-tmpl-save,.btn-tmpl-test{
+  flex:1;min-width:120px;
+  padding:9px 12px;border-radius:var(--rs);
+  font-size:13px;font-weight:600;font-family:'DM Sans',sans-serif;
+  cursor:pointer;transition:all .18s;border:1.5px solid transparent;
+  display:flex;align-items:center;justify-content:center;gap:6px;
+}
+.btn-tmpl-save{
+  background:var(--accent);color:#fff;border-color:var(--accent);
+}
+.btn-tmpl-save:active{transform:scale(.97);opacity:.88}
+.btn-tmpl-save.loading{opacity:.65;pointer-events:none}
+.btn-tmpl-save.ok{background:var(--sbg);border-color:var(--sbr);color:var(--success)}
+.btn-tmpl-save.fail{background:var(--dbg);border-color:var(--dbr);color:var(--danger)}
+
+.btn-tmpl-test{
+  background:var(--bg3);color:var(--text1);border-color:var(--border2);
+}
+.btn-tmpl-test:active{transform:scale(.97);opacity:.88}
+.btn-tmpl-test.loading{opacity:.65;pointer-events:none}
+.btn-tmpl-test.ok{background:var(--sbg);border-color:var(--sbr);color:var(--success)}
+.btn-tmpl-test.fail{background:var(--dbg);border-color:var(--dbr);color:var(--danger)}
+
+.tmpl-result{
+  margin-top:8px;padding:10px 13px;border-radius:var(--rs);
+  font-size:12px;font-weight:500;line-height:1.5;word-break:break-word;
+}
+.tmpl-result.ok{background:var(--sbg);border:1.5px solid var(--sbr);color:var(--success)}
+.tmpl-result.fail{background:var(--dbg);border:1.5px solid var(--dbr);color:var(--danger)}
+.tmpl-result.loading{background:var(--bg3);border:1.5px solid var(--border2);color:var(--text2)}
+.tmpl-result .preview{
+  margin-top:6px;padding:8px 10px;
+  background:var(--bg2);border-radius:6px;
+  font-size:11px;color:var(--text2);white-space:pre-wrap;
+}

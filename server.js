@@ -181,22 +181,25 @@ app.post('/api/sms-config', async (req, res) => {
 
 // ── 4. SHABLON TEST SMS ─────────────────────────────────────────
 // POST /api/sms/test
-// Body: { token, phone, template_key, car? }
-// Bitta shablonni test qilish uchun
+// Body: { token, phone, template_key, template_override?, car? }
+// template_override: frontenddan textarea dagi joriy matn (ixtiyoriy)
+// Bitta shablonni test qilish uchun — Firebase dagi yoki override matn bilan
 app.post('/api/sms/test', async (req, res) => {
-  const { token, phone, template_key, car } = req.body || {};
+  const { token, phone, template_key, template_override, car } = req.body || {};
 
-  if (!token)        return res.status(400).json({ error: 'token majburiy' });
-  if (!phone)        return res.status(400).json({ error: 'phone majburiy' });
-  if (!template_key) return res.status(400).json({ error: 'template_key majburiy' });
+  if (!token)        return res.status(400).json({ ok: false, error: 'token majburiy' });
+  if (!phone)        return res.status(400).json({ ok: false, error: 'phone majburiy' });
+  if (!template_key) return res.status(400).json({ ok: false, error: 'template_key majburiy' });
 
   // Firebase dan joriy shablonni olamiz
   const cfgRes = await fbGet('sms_config');
   const config = { ...DEFAULT_SMS, ...(cfgRes.data || {}) };
 
-  const tmpl = config[template_key] || DEFAULT_SMS[template_key] || DEFAULT_SMS.default_change_message;
+  // template_override berilgan bo'lsa — Firebase dagi o'rniga shu ishlatiladi
+  // Shu bilan "saqlashdan oldin test" ham mumkin
+  const tmpl = template_override?.trim() || config[template_key] || DEFAULT_SMS[template_key] || DEFAULT_SMS.default_change_message;
 
-  // Test uchun sintetik mashina
+  // Test uchun sintetik mashina (frontenddan real mashina ham kelishi mumkin)
   const testCar = {
     car_name:   car?.car_name   || 'Nexia 3',
     car_number: car?.car_number || '01A 123BC',
@@ -208,15 +211,19 @@ app.post('/api/sms/test', async (req, res) => {
   const svcLabel = SVC_META[svcType]?.label || svcType;
   const text     = fillTemplate(tmpl, testCar, svcType, svcLabel);
 
+  console.log(`📤 Test SMS [${template_key}] → ${phone}`);
+  console.log('   Matn:', text);
+
   const smsRes = await sendSms(token, phone, text);
 
   res.json({
-    ok:       smsRes.ok,
-    sent_to:  phone,
+    ok:              smsRes.ok,
+    sent_to:         phone,
     text,
-    template: tmpl,
-    devsms:   smsRes.data,
-    error:    smsRes.error,
+    template_used:   tmpl,
+    template_source: template_override ? 'override (textarea)' : 'firebase',
+    devsms:          smsRes.data,
+    error:           smsRes.error,
   });
 });
 

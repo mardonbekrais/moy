@@ -279,41 +279,91 @@
                 <label class="tg"><input type="checkbox" id="firebase-enabled" checked><span class="ts"></span></label>
               </div>
             </div>
+            <!-- ═══ SHABLONLAR ═══ -->
             <div class="fc">
-              <div class="fct">📩 Mashina saqlash SMS shabloni</div>
-              <p style="font-size:12px;color:var(--text2);margin-bottom:10px">Mashina saqlanganda bir marta yuboriladi. {services} — nima almashtirilgani ro'yxati</p>
+              <div class="fct">📩 Mashina saqlash shabloni</div>
+              <p style="font-size:12px;color:var(--text2);margin-bottom:10px">Mashina qo'shilganda bir marta yuboriladi. <code>{services}</code> — nima almashtirilgani ro'yxati</p>
               <div class="fg">
-                <label>Shablon</label>
+                <label>Shablon matni</label>
                 <textarea id="sms-save-message" rows="4" placeholder="{car_name} ({car_number}) saqlandi!&#10;📅 {date} {time}&#10;🔧 Almashtirildi: {services}&#10;🏁 Probeg: {km} km"></textarea>
               </div>
+              <div class="tmpl-actions">
+                <button type="button" class="btn-tmpl-save" onclick="saveTemplate('save_message','sms-save-message')">💾 Shablonni saqlash</button>
+                <button type="button" class="btn-tmpl-test" onclick="testTemplate('save_message','sms-save-message')">📤 Test SMS</button>
+              </div>
+              <div id="tmpl-result-save_message" class="tmpl-result" style="display:none"></div>
             </div>
+
             <div class="fc">
               <div class="fct">🛢️ Xizmat shablonlari</div>
-              <p style="font-size:12px;color:var(--text2);margin-bottom:12px">Xizmat almashtirish tugmasini bosganda yuboriladi</p>
-              <div class="fg">
+              <p style="font-size:12px;color:var(--text2);margin-bottom:12px">Xizmat almashtirish tugmasini bosganda yuboriladi. Har birini alohida saqlang.</p>
+
+              <!-- OIL -->
+              <div class="tmpl-block">
                 <label>🛢️ Dvigatel Moyi</label>
                 <textarea id="sms-oil-message" rows="3" placeholder="{car_name} ({car_number}) — dvigatel moyi: {oil_brand}&#10;📅 {date} {time} · 🏁 {km} km"></textarea>
+                <div class="tmpl-actions">
+                  <button type="button" class="btn-tmpl-save" onclick="saveTemplate('oil_message','sms-oil-message')">💾 Shablonni saqlash</button>
+                  <button type="button" class="btn-tmpl-test" onclick="testTemplate('oil_message','sms-oil-message')">📤 Test SMS</button>
+                </div>
+                <div id="tmpl-result-oil_message" class="tmpl-result" style="display:none"></div>
               </div>
-              <div class="fg">
+
+              <!-- GEARBOX -->
+              <div class="tmpl-block">
                 <label>🟢 Karobka Moyi</label>
                 <textarea id="sms-gearbox-message" rows="3" placeholder="{car_name} ({car_number}) — karobka moyi yangilandi&#10;📅 {date} {time} · 🏁 {km} km"></textarea>
+                <div class="tmpl-actions">
+                  <button type="button" class="btn-tmpl-save" onclick="saveTemplate('gearbox_message','sms-gearbox-message')">💾 Shablonni saqlash</button>
+                  <button type="button" class="btn-tmpl-test" onclick="testTemplate('gearbox_message','sms-gearbox-message')">📤 Test SMS</button>
+                </div>
+                <div id="tmpl-result-gearbox_message" class="tmpl-result" style="display:none"></div>
               </div>
-              <div class="fg">
+
+              <!-- ANTIFREEZE -->
+              <div class="tmpl-block">
                 <label>🔵 Antifriz</label>
                 <textarea id="sms-antifreeze-message" rows="3" placeholder="{car_name} ({car_number}) — antifriz yangilandi&#10;📅 {date} {time} · 🏁 {km} km"></textarea>
+                <div class="tmpl-actions">
+                  <button type="button" class="btn-tmpl-save" onclick="saveTemplate('antifreeze_message','sms-antifreeze-message')">💾 Shablonni saqlash</button>
+                  <button type="button" class="btn-tmpl-test" onclick="testTemplate('antifreeze_message','sms-antifreeze-message')">📤 Test SMS</button>
+                </div>
+                <div id="tmpl-result-antifreeze_message" class="tmpl-result" style="display:none"></div>
               </div>
-              <div class="fg">
+
+              <!-- AIR FILTER -->
+              <div class="tmpl-block">
                 <label>💨 Havo Filtr</label>
                 <textarea id="sms-air-filter-message" rows="3" placeholder="{car_name} ({car_number}) — havo filtr almashtirildi&#10;📅 {date} {time} · 🏁 {km} km"></textarea>
+                <div class="tmpl-actions">
+                  <button type="button" class="btn-tmpl-save" onclick="saveTemplate('air_filter_message','sms-air-filter-message')">💾 Shablonni saqlash</button>
+                  <button type="button" class="btn-tmpl-test" onclick="testTemplate('air_filter_message','sms-air-filter-message')">📤 Test SMS</button>
+                </div>
+                <div id="tmpl-result-air_filter_message" class="tmpl-result" style="display:none"></div>
               </div>
-              <div class="fg">
+
+              <!-- CABIN FILTER -->
+              <div class="tmpl-block">
                 <label>🌬️ Salon Filtr</label>
                 <textarea id="sms-cabin-filter-message" rows="3" placeholder="{car_name} ({car_number}) — salon filtr almashtirildi&#10;📅 {date} {time} · 🏁 {km} km"></textarea>
+                <div class="tmpl-actions">
+                  <button type="button" class="btn-tmpl-save" onclick="saveTemplate('cabin_filter_message','sms-cabin-filter-message')">💾 Shablonni saqlash</button>
+                  <button type="button" class="btn-tmpl-test" onclick="testTemplate('cabin_filter_message','sms-cabin-filter-message')">📤 Test SMS</button>
+                </div>
+                <div id="tmpl-result-cabin_filter_message" class="tmpl-result" style="display:none"></div>
               </div>
-              <div class="fg">
+
+              <!-- OIL FILTER -->
+              <div class="tmpl-block">
                 <label>🔩 Moy Filtr</label>
                 <textarea id="sms-oil-filter-message" rows="3" placeholder="{car_name} ({car_number}) — moy filtr almashtirildi&#10;📅 {date} {time} · 🏁 {km} km"></textarea>
+                <div class="tmpl-actions">
+                  <button type="button" class="btn-tmpl-save" onclick="saveTemplate('oil_filter_message','sms-oil-filter-message')">💾 Shablonni saqlash</button>
+                  <button type="button" class="btn-tmpl-test" onclick="testTemplate('oil_filter_message','sms-oil-filter-message')">📤 Test SMS</button>
+                </div>
+                <div id="tmpl-result-oil_filter_message" class="tmpl-result" style="display:none"></div>
               </div>
+
             </div>
           </form>
         </div>
