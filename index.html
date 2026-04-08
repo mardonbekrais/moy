@@ -12,6 +12,16 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<div id="pin-overlay" class="pin-overlay active">
+  <div class="pin-card">
+    <div class="pin-icon">🔐</div>
+    <h2>PIN orqali kirish</h2>
+    <p>Ilova ko‘rinishi o‘zgarmaydi. Faqat kirishda pinkod so‘raladi.</p>
+    <input id="pin-input" class="pin-input" type="password" inputmode="numeric" placeholder="PIN kod" autocomplete="off">
+    <button id="pin-submit" class="pin-btn">Kirish</button>
+    <div id="pin-status" class="pin-status"></div>
+  </div>
+</div>
 <div class="app">
 
   <!-- HEADER -->
@@ -290,7 +300,7 @@
               <div class="fct">📡 Tizim holati</div>
               <div class="sr"><span>API Token</span><strong id="sms-api-status">—</strong></div>
               <div class="sr"><span>Backend</span><strong id="sms-backend-status">—</strong></div>
-              <div class="sr"><span>Firebase</span><strong id="sms-firebase-status">—</strong></div>
+              <div class="sr"><span>Database</span><strong id="sms-database-status">—</strong></div>
               <div style="display:flex;gap:8px;margin-top:10px">
                 <button class="bghost" style="margin-top:0;flex:1" onclick="checkBackendStatus()">🔍 Tekshirish</button>
                 <button class="bghost" style="margin-top:0;flex:1" onclick="resetSmsCount()">🔄 Tiklash</button>
@@ -308,7 +318,12 @@
                 <label>Xabar matni</label>
                 <textarea id="quick-sms-text" rows="3" placeholder="SMS matni..."></textarea>
               </div>
-              <button type="button" class="bsub" onclick="quickSendSms()">📤 SMS Yuborish</button>
+              <div class="fg">
+                <label>Qachon yuborilsin (ixtiyoriy)</label>
+                <input type="datetime-local" id="quick-sms-schedule">
+              </div>
+              <button type="button" class="bsub" onclick="quickSendSms()">📤 Yuborish / Rejalashtirish</button>
+              <div class="sched-list" id="scheduled-sms-list"><div class="sms-log-empty">⏰ Rejalashtirilgan SMS yo‘q</div></div>
               <div id="quick-sms-result" class="tmpl-result" style="display:none;margin-top:10px"></div>
             </div>
 
@@ -349,6 +364,7 @@
                     <button type="button" onclick="toggleTokenVisibility()" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text2);cursor:pointer;font-size:16px" id="token-eye">👁️</button>
                   </div>
                 </div>
+                <div id="saved-token-note" style="font-size:12px;color:var(--text2);margin-top:6px">Token hali saqlanmagan</div>
                 <div id="token-verify-result" class="tmpl-result" style="display:none;margin-top:6px"></div>
                 <button type="button" class="bghost" style="margin-top:8px" onclick="verifyToken()">🔍 Token Tekshirish</button>
                 <div class="tr" style="margin-top:10px">
@@ -358,20 +374,20 @@
                 <button type="submit" class="bsub" style="margin-top:12px">✅ Saqlash va Ishga Tushurish</button>
               </div>
 
-              <!-- Firebase -->
+              <!-- Database -->
               <div class="fc">
-                <div class="fct">🔥 Firebase Ulanish</div>
+                <div class="fct">🗄️ Ma'lumotlar bazasi</div>
                 <div style="background:var(--sbg);border:1.5px solid var(--sbr);border-radius:var(--rs);padding:10px 12px;margin-bottom:12px;font-size:12px;color:var(--success);line-height:1.6">
-                  ✅ <strong>Firebase ulangan!</strong> Ma'lumotlar avtomatik saqlanadi.<br>
-                  <span style="color:var(--text2)">URL: <code id="firebase-url-display" style="color:var(--accent);font-size:11px">https://gilamuz-8308f-default-rtdb.firebaseio.com</code></span>
+                  ✅ <strong>Baza backend orqali ulangan.</strong> Frontend ma'lumotlar bazasiga to'g'ridan-to'g'ri ulanmaydi.<br>
+                  <span style="color:var(--text2)">Saqlash va o'qish faqat backend orqali bajariladi.</span>
                 </div>
-                <button type="button" class="btn-test-supa" id="btn-test-firebase" onclick="testFirebase()">
+                <button type="button" class="btn-test-supa" id="btn-test-database" onclick="testDatabase()">
                   🔗 Ulanishni Tekshirish
                 </button>
-                <div id="firebase-test-result" class="supa-result" style="display:none"></div>
+                <div id="database-test-result" class="supa-result" style="display:none"></div>
                 <div class="tr" style="margin-top:12px">
-                  <label class="tl">Firebase yoqish</label>
-                  <label class="tg"><input type="checkbox" id="firebase-enabled" checked><span class="ts"></span></label>
+                  <label class="tl">Backend orqali saqlash faol</label>
+                  <div style="font-size:12px;color:var(--success)">Faol</div>
                 </div>
               </div>
             </form>
@@ -379,11 +395,10 @@
             <!-- O'zgaruvchilar -->
             <div class="fc">
               <div class="fct">📌 Mavjud o'zgaruvchilar</div>
-              <div class="sms-autovar">✨ {car_name} va {car_number} avtomatik qo'shiladi</div>
+              <div class="sms-autovar">✨ Asosiy o'zgaruvchilar avtomatik qo'shiladi</div>
               <div class="svars">
                 <code>{car_name}</code><code>{car_number}</code><code>{km}</code>
-                <code>{date}</code><code>{time}</code><code>{services}</code>
-                <code>{oil_brand}</code><code>{service_label}</code>
+                <code>{date}</code><code>{service_name}</code>
               </div>
             </div>
 
@@ -395,97 +410,35 @@
           <div class="fw" style="padding-top:10px">
 
             <div class="fc">
-              <div class="fct">📩 Mashina saqlash shabloni</div>
-              <p style="font-size:12px;color:var(--text2);margin-bottom:10px">Mashina qo'shilganda bir marta yuboriladi. <code>{services}</code> — nima almashtirilgani ro'yxati</p>
+              <div class="fct">📩 1-shablon: Xizmat bajarildi</div>
+              <p style="font-size:12px;color:var(--text2);margin-bottom:10px">Tasdiqlatish uchun asosiy rasmiy shablon. Mashina saqlanganda va xizmat bajarilganda ishlatiladi.</p>
               <div class="fg">
                 <label>Shablon matni</label>
-                <textarea id="sms-save-message" rows="4" placeholder="{car_name} ({car_number}) saqlandi!&#10;📅 {date} {time}&#10;🔧 Almashtirildi: {services}&#10;🏁 Probeg: {km} km"></textarea>
+                <textarea id="sms-service-done-message" rows="4" placeholder="Hurmatli mijoz, {car_name} ({car_number}) avtomobili bo'yicha quyidagi ma'lumot qayd etildi: {service_name}.&#10;Sana: {date}.&#10;Joriy probeg: {km} km."></textarea>
               </div>
               <div class="tmpl-actions">
-                <button type="button" class="btn-tmpl-edit" onclick="openEditor('save_message','sms-save-message','📩 Mashina saqlash shabloni')">✏️ Tahrirlash</button>
-                <button type="button" class="btn-tmpl-save" onclick="saveTemplate('save_message','sms-save-message')">💾 Saqlash</button>
-                <button type="button" class="btn-tmpl-test" onclick="testTemplate('save_message','sms-save-message')">📤 Test SMS</button>
+                <button type="button" class="btn-tmpl-edit" onclick="openEditor('service_done_message','sms-service-done-message','1-shablon: Xizmat bajarildi')">✏️ Tahrirlash</button>
+                <button type="button" class="btn-tmpl-save" onclick="saveTemplate('service_done_message','sms-service-done-message')">💾 Saqlash</button>
+                <button type="button" class="btn-tmpl-test" onclick="testTemplate('service_done_message','sms-service-done-message')">📤 Test SMS</button>
               </div>
-              <div id="tmpl-result-save_message" class="tmpl-result" style="display:none"></div>
+              <div id="tmpl-result-service_done_message" class="tmpl-result" style="display:none"></div>
             </div>
 
             <div class="fc">
-              <div class="fct">🛢️ Xizmat shablonlari</div>
-              <p style="font-size:12px;color:var(--text2);margin-bottom:12px">Xizmat almashtirish tugmasini bosganda yuboriladi.</p>
-
-              <!-- OIL -->
-              <div class="tmpl-block">
-                <label>🛢️ Dvigatel Moyi</label>
-                <textarea id="sms-oil-message" rows="3" placeholder="{car_name} ({car_number}) — dvigatel moyi: {oil_brand}&#10;📅 {date} {time} · 🏁 {km} km"></textarea>
-                <div class="tmpl-actions">
-                  <button type="button" class="btn-tmpl-edit" onclick="openEditor('oil_message','sms-oil-message','🛢️ Dvigatel Moyi shabloni')">✏️ Tahrirlash</button>
-                  <button type="button" class="btn-tmpl-save" onclick="saveTemplate('oil_message','sms-oil-message')">💾 Saqlash</button>
-                  <button type="button" class="btn-tmpl-test" onclick="testTemplate('oil_message','sms-oil-message')">📤 Test SMS</button>
-                </div>
-                <div id="tmpl-result-oil_message" class="tmpl-result" style="display:none"></div>
+              <div class="fct">⏰ 2-shablon: Xizmat muddati keldi</div>
+              <p style="font-size:12px;color:var(--text2);margin-bottom:10px">Avtomatik reminder va muddat kelgan xizmatlar uchun ishlatiladi.</p>
+              <div class="fg">
+                <label>Shablon matni</label>
+                <textarea id="sms-service-due-message" rows="4" placeholder="Hurmatli mijoz, {car_name} ({car_number}) avtomobili bo'yicha quyidagi xizmatni bajarish tavsiya etiladi: {service_name}.&#10;Sana: {date}.&#10;Joriy probeg: {km} km."></textarea>
               </div>
-
-              <!-- GEARBOX -->
-              <div class="tmpl-block">
-                <label>🟢 Karobka Moyi</label>
-                <textarea id="sms-gearbox-message" rows="3" placeholder="{car_name} ({car_number}) — karobka moyi yangilandi&#10;📅 {date} {time} · 🏁 {km} km"></textarea>
-                <div class="tmpl-actions">
-                  <button type="button" class="btn-tmpl-edit" onclick="openEditor('gearbox_message','sms-gearbox-message','🟢 Karobka Moyi shabloni')">✏️ Tahrirlash</button>
-                  <button type="button" class="btn-tmpl-save" onclick="saveTemplate('gearbox_message','sms-gearbox-message')">💾 Saqlash</button>
-                  <button type="button" class="btn-tmpl-test" onclick="testTemplate('gearbox_message','sms-gearbox-message')">📤 Test SMS</button>
-                </div>
-                <div id="tmpl-result-gearbox_message" class="tmpl-result" style="display:none"></div>
+              <div class="tmpl-actions">
+                <button type="button" class="btn-tmpl-edit" onclick="openEditor('service_due_message','sms-service-due-message','2-shablon: Xizmat muddati keldi')">✏️ Tahrirlash</button>
+                <button type="button" class="btn-tmpl-save" onclick="saveTemplate('service_due_message','sms-service-due-message')">💾 Saqlash</button>
+                <button type="button" class="btn-tmpl-test" onclick="testTemplate('service_due_message','sms-service-due-message')">📤 Test SMS</button>
               </div>
-
-              <!-- ANTIFREEZE -->
-              <div class="tmpl-block">
-                <label>🔵 Antifriz</label>
-                <textarea id="sms-antifreeze-message" rows="3" placeholder="{car_name} ({car_number}) — antifriz yangilandi&#10;📅 {date} {time} · 🏁 {km} km"></textarea>
-                <div class="tmpl-actions">
-                  <button type="button" class="btn-tmpl-edit" onclick="openEditor('antifreeze_message','sms-antifreeze-message','🔵 Antifriz shabloni')">✏️ Tahrirlash</button>
-                  <button type="button" class="btn-tmpl-save" onclick="saveTemplate('antifreeze_message','sms-antifreeze-message')">💾 Saqlash</button>
-                  <button type="button" class="btn-tmpl-test" onclick="testTemplate('antifreeze_message','sms-antifreeze-message')">📤 Test SMS</button>
-                </div>
-                <div id="tmpl-result-antifreeze_message" class="tmpl-result" style="display:none"></div>
-              </div>
-
-              <!-- AIR FILTER -->
-              <div class="tmpl-block">
-                <label>💨 Havo Filtr</label>
-                <textarea id="sms-air-filter-message" rows="3" placeholder="{car_name} ({car_number}) — havo filtr almashtirildi&#10;📅 {date} {time} · 🏁 {km} km"></textarea>
-                <div class="tmpl-actions">
-                  <button type="button" class="btn-tmpl-edit" onclick="openEditor('air_filter_message','sms-air-filter-message','💨 Havo Filtr shabloni')">✏️ Tahrirlash</button>
-                  <button type="button" class="btn-tmpl-save" onclick="saveTemplate('air_filter_message','sms-air-filter-message')">💾 Saqlash</button>
-                  <button type="button" class="btn-tmpl-test" onclick="testTemplate('air_filter_message','sms-air-filter-message')">📤 Test SMS</button>
-                </div>
-                <div id="tmpl-result-air_filter_message" class="tmpl-result" style="display:none"></div>
-              </div>
-
-              <!-- CABIN FILTER -->
-              <div class="tmpl-block">
-                <label>🌬️ Salon Filtr</label>
-                <textarea id="sms-cabin-filter-message" rows="3" placeholder="{car_name} ({car_number}) — salon filtr almashtirildi&#10;📅 {date} {time} · 🏁 {km} km"></textarea>
-                <div class="tmpl-actions">
-                  <button type="button" class="btn-tmpl-edit" onclick="openEditor('cabin_filter_message','sms-cabin-filter-message','🌬️ Salon Filtr shabloni')">✏️ Tahrirlash</button>
-                  <button type="button" class="btn-tmpl-save" onclick="saveTemplate('cabin_filter_message','sms-cabin-filter-message')">💾 Saqlash</button>
-                  <button type="button" class="btn-tmpl-test" onclick="testTemplate('cabin_filter_message','sms-cabin-filter-message')">📤 Test SMS</button>
-                </div>
-                <div id="tmpl-result-cabin_filter_message" class="tmpl-result" style="display:none"></div>
-              </div>
-
-              <!-- OIL FILTER -->
-              <div class="tmpl-block">
-                <label>🔩 Moy Filtr</label>
-                <textarea id="sms-oil-filter-message" rows="3" placeholder="{car_name} ({car_number}) — moy filtr almashtirildi&#10;📅 {date} {time} · 🏁 {km} km"></textarea>
-                <div class="tmpl-actions">
-                  <button type="button" class="btn-tmpl-edit" onclick="openEditor('oil_filter_message','sms-oil-filter-message','🔩 Moy Filtr shabloni')">✏️ Tahrirlash</button>
-                  <button type="button" class="btn-tmpl-save" onclick="saveTemplate('oil_filter_message','sms-oil-filter-message')">💾 Saqlash</button>
-                  <button type="button" class="btn-tmpl-test" onclick="testTemplate('oil_filter_message','sms-oil-filter-message')">📤 Test SMS</button>
-                </div>
-                <div id="tmpl-result-oil_filter_message" class="tmpl-result" style="display:none"></div>
-              </div>
-
+              <div id="tmpl-result-service_due_message" class="tmpl-result" style="display:none"></div>
             </div>
+
           </div>
         </div>
 
@@ -529,10 +482,7 @@
           <button type="button" class="evar-chip" onclick="insertVar('{car_number}')">{car_number}</button>
           <button type="button" class="evar-chip" onclick="insertVar('{km}')">{km}</button>
           <button type="button" class="evar-chip" onclick="insertVar('{date}')">{date}</button>
-          <button type="button" class="evar-chip" onclick="insertVar('{time}')">{time}</button>
-          <button type="button" class="evar-chip" onclick="insertVar('{services}')">{services}</button>
-          <button type="button" class="evar-chip" onclick="insertVar('{oil_brand}')">{oil_brand}</button>
-          <button type="button" class="evar-chip" onclick="insertVar('{service_label}')">{service_label}</button>
+          <button type="button" class="evar-chip" onclick="insertVar('{service_name}')">{service_name}</button>
         </div>
       </div>
       <textarea id="emod-textarea" class="emod-textarea" placeholder="SMS matni..."></textarea>
@@ -586,7 +536,7 @@
           <div class="srow click" onclick="exportData()"><span>📤 Eksport (JSON)</span><span>›</span></div>
           <div class="srow click dr" onclick="confirmClear()"><span>🗑️ Barcha ma'lumotlarni o'chirish</span><span>›</span></div>
         </div>
-        <div class="ver">MoyTrack v4.3 Pro · Firebase 🔥</div>
+        <div class="ver">MoyTrack v4.4 Pro · Backend + Database</div>
       </div>
     </div>
   </div>

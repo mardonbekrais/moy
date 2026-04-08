@@ -1,9 +1,7 @@
 // ================================================================
-// MOYTRACK PRO v4.3  —  app.js
-// Firebase Realtime DB: cars · oils · sms_config · service_logs
+// MOYTRACK PRO v4.4  —  app.js
+// Backend-markazli saqlash: cars · oils · sms_config · sms_logs · sms_queue
 // ================================================================
-
-const FIREBASE_URL = 'https://gilamuz-8308f-default-rtdb.firebaseio.com';
 
 // ── BACKEND API URL ──────────────────────────────────────────────
 // Avtomatik aniqlash: agar localhost bo'lsa — 3001 port,
@@ -12,75 +10,128 @@ const BACKEND_URL = (location.hostname === 'localhost' || location.hostname === 
   ? `http://${location.hostname}:3001`
   : `${location.protocol}//${location.host}`;
 
-// ===== LOCAL DB =====
-const DB = {
-  get(k, d = []) { try { const v = localStorage.getItem('mt_' + k); return v ? JSON.parse(v) : d; } catch { return d; } },
-  set(k, v)      { try { localStorage.setItem('mt_' + k, JSON.stringify(v)); } catch(e) { console.warn(e); } },
-  nextId(k)      { const id = this.get('_id_' + k, 0) + 1; this.set('_id_' + k, id); return id; }
-};
+const API_DEFAULT_OPTIONS = { credentials: 'same-origin' };
+let isAuthenticated = false;
+let scheduledSmsItems = [];
 
-// ===== FIREBASE REST API =====
-const FB = {
-  async get(path) {
-    try {
-      const r = await fetch(`${FIREBASE_URL}/${path}.json`);
-      if (!r.ok) return { ok: false, status: r.status, data: null };
-      const data = await r.json();
-      return { ok: true, status: r.status, data };
-    } catch(e) { return { ok: false, status: 0, error: e.message }; }
-  },
-  async put(path, body) {
-    try {
-      const r = await fetch(`${FIREBASE_URL}/${path}.json`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
-      const data = await r.json().catch(() => null);
-      return { ok: r.ok, status: r.status, data };
-    } catch(e) { return { ok: false, status: 0, error: e.message }; }
-  },
-  async delete(path) {
-    try {
-      const r = await fetch(`${FIREBASE_URL}/${path}.json`, { method: 'DELETE' });
-      return { ok: r.ok, status: r.status };
-    } catch(e) { return { ok: false, status: 0, error: e.message }; }
+async function apiFetch(url, options = {}) {
+  const finalOptions = { ...API_DEFAULT_OPTIONS, ...options, headers: { ...(options.headers || {}) } };
+  const res = await fetch(url, finalOptions);
+  if (res.status === 401) {
+    lockApp();
+    throw new Error('PIN talab qilinadi');
   }
+  return res;
+}
+async function apiJson(url, options = {}) {
+  const res = await apiFetch(url, options);
+  return res.json().catch(() => ({}));
+}
+function normalizePhone(phone) {
+  const digits = String(phone || '').replace(/\D/g, '');
+  if (digits.startsWith('998') && digits.length === 12) return digits;
+  if (digits.length === 9) return '998' + digits;
+  return digits;
+}
+function lockApp() {
+  isAuthenticated = false;
+  document.body.classList.add('app-locked');
+  const overlay = document.getElementById('pin-overlay');
+  if (overlay) overlay.classList.add('active');
+}
+function unlockApp() {
+  isAuthenticated = true;
+  document.body.classList.remove('app-locked');
+  const overlay = document.getElementById('pin-overlay');
+  if (overlay) overlay.classList.remove('active');
+}
+async function checkAuth() {
+  try {
+    const data = await apiJson(`${BACKEND_URL}/api/auth/me`);
+    return !!data.ok;
+  } catch { return false; }
+}
+async function doPinLogin() {
+  const input = document.getElementById('pin-input');
+  const status = document.getElementById('pin-status');
+  const btn = document.getElementById('pin-submit');
+  const pin = input?.value?.trim();
+  if (!pin) {
+    if (status) { status.textContent = 'PIN kiriting'; status.className = 'pin-status error'; }
+    return;
+  }
+  btn.disabled = true;
+  if (status) { status.textContent = 'Tekshirilmoqda...'; status.className = 'pin-status'; }
+  try {
+    const data = await apiJson(`${BACKEND_URL}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin })
+    });
+    if (!data.ok) throw new Error(data.error || 'PIN xato');
+    unlockApp();
+    await loadFromBackend();
+    if (status) { status.textContent = 'Muvaffaqiyatli'; status.className = 'pin-status success'; }
+    input.value = '';
+  } catch (e) {
+    if (status) { status.textContent = e.message || 'PIN xato'; status.className = 'pin-status error'; }
+    lockApp();
+  } finally {
+    btn.disabled = false;
+  }
+}
+async function loadFromBackend() {
+  const data = await apiJson(`${BACKEND_URL}/api/bootstrap`);
+  if (!data.ok) throw new Error(data.error || 'Yuklashda xato');
+  allCars = Array.isArray(data.cars) ? data.cars : [];
+  allOils = Array.isArray(data.oils) ? data.oils : allOils;
+  smsConfig = { ...DEFAULT_SMS, ...smsConfig, ...(data.sms_config || {}) };
+  cfg = { ...cfg, ...(data.cfg || {}) };
+  scheduledSmsItems = Array.isArray(data.schedules) ? data.schedules : [];
+  saveCars(); saveOils(); saveSms(); saveCfg();
+  WPCT = cfg.warn_pct / 100;
+  DPCT = cfg.danger_pct / 100;
+  loadDashboard();
+  loadCarsGrid();
+  renderOilSel('oil-name');
+  renderSmsLog(Array.isArray(data.logs) ? data.logs : getSmsLog());
+  refreshScheduleList();
+  if (document.getElementById('sms')?.classList.contains('active')) loadSmsPage();
+}
+
+// ===== UI CACHE (avtoritativ emas) =====
+const DB = {
+  get(k, d = []) { try { const v = sessionStorage.getItem('mt_' + k); return v ? JSON.parse(v) : d; } catch { return d; } },
+  set(k, v)      { try { sessionStorage.setItem('mt_' + k, JSON.stringify(v)); } catch(e) { console.warn(e); } },
+  nextId(k)      { const id = this.get('_id_' + k, 0) + 1; this.set('_id_' + k, id); return id; }
 };
 
 // ===== DEFAULT SMS =====
 const DEFAULT_SMS = {
-  save_message:            '{car_name} ({car_number}) saqlandi!\n📅 {date} {time}\n🔧 Almashtirildi: {services}\n🏁 Probeg: {km} km',
-  oil_message:             '{car_name} ({car_number}) — dvigatel moyi: {oil_brand}\n📅 {date} {time} · 🏁 {km} km',
-  gearbox_message:         '{car_name} ({car_number}) — karobka moyi yangilandi\n📅 {date} {time} · 🏁 {km} km',
-  antifreeze_message:      '{car_name} ({car_number}) — antifriz yangilandi\n📅 {date} {time} · 🏁 {km} km',
-  air_filter_message:      '{car_name} ({car_number}) — havo filtr almashtirildi\n📅 {date} {time} · 🏁 {km} km',
-  cabin_filter_message:    '{car_name} ({car_number}) — salon filtr almashtirildi\n📅 {date} {time} · 🏁 {km} km',
-  oil_filter_message:      '{car_name} ({car_number}) — moy filtr almashtirildi\n📅 {date} {time} · 🏁 {km} km',
-  default_change_message:  '{car_name} ({car_number}) — {service_label} almashtirildi\n📅 {date} {time} · 🏁 {km} km',
+  service_done_message: "Hurmatli mijoz, {car_name} ({car_number}) avtomobili bo'yicha quyidagi ma'lumot qayd etildi: {service_name}.\nSana: {date}.\nJoriy probeg: {km} km.",
+  service_due_message:  "Hurmatli mijoz, {car_name} ({car_number}) avtomobili bo'yicha quyidagi xizmatni bajarish tavsiya etiladi: {service_name}.\nSana: {date}.\nJoriy probeg: {km} km.",
 };
 
 // ===== STATE =====
-let allCars = DB.get('cars', []);
-let allOils = DB.get('oils', [
+let allCars = []; // authoritative source: backend
+let allOils = [
   { id: 1, name: 'SAE 5W-30',  interval: 10000 },
   { id: 2, name: 'SAE 5W-40',  interval: 7000  },
   { id: 3, name: 'SAE 10W-40', interval: 8000  }
-]);
-let smsConfig = DB.get('sms', {
+];
+let smsConfig = {
   devsms_token: '', enabled: false, sms_sent_count: 0,
-  firebase_enabled: true,
   ...DEFAULT_SMS
-});
-let cfg  = DB.get('cfg', { warn_pct: 80, danger_pct: 100, theme: 'dark' });
+};
+let cfg  = { warn_pct: 80, danger_pct: 100, theme: 'dark' };
 let WPCT = cfg.warn_pct   / 100;
 let DPCT = cfg.danger_pct / 100;
 let curCar = null;
 
-const saveCars = () => DB.set('cars', allCars);
-const saveOils = () => DB.set('oils', allOils);
-const saveSms  = () => DB.set('sms',  smsConfig);
-const saveCfg  = () => DB.set('cfg',  cfg);
+const saveCars = () => DB.set('cars_cache', allCars);
+const saveOils = () => DB.set('oils_cache', allOils);
+const saveSms  = () => DB.set('sms_cache',  { has_token: smsConfig.has_token, masked_token: smsConfig.masked_token, enabled: smsConfig.enabled, sms_sent_count: smsConfig.sms_sent_count, test_phone: smsConfig.test_phone });
+const saveCfg  = () => DB.set('cfg_cache',  cfg);
 
 // ===== SERVICE META =====
 const SVC_META = {
@@ -130,200 +181,98 @@ function badgeOf(u) {
 function nowDate() { return new Date().toLocaleDateString('uz-UZ', { year: 'numeric', month: '2-digit', day: '2-digit' }); }
 function nowTime() { return new Date().toLocaleTimeString('uz-UZ', { hour: '2-digit', minute: '2-digit' }); }
 
-// ===== FIREBASE — YUKLASH =====
-// Barcha ma'lumotlarni Firebase dan yuklaydi:
-// cars, oils, sms_config
-async function loadFromFirebase() {
-  let changed = false;
-
-  // — CARS —
+// ===== BACKEND — YUKLASH =====
+// Barcha ma'lumotlarni backend orqali yuklaydi.
+async function loadFromDatabase() {
   try {
-    const r = await FB.get('cars');
-    if (r.ok && r.data && typeof r.data === 'object') {
-      const fbCars = Object.values(r.data).filter(Boolean).map(c => ({ ...c, id: Number(c.id) || c.id }));
-      if (fbCars.length > 0) { allCars = fbCars; saveCars(); changed = true; }
-    }
-  } catch(e) { console.warn('Firebase cars:', e); }
-
-  // — OILS —
-  try {
-    const r = await FB.get('oils');
-    if (r.ok && r.data && typeof r.data === 'object') {
-      const fbOils = Object.values(r.data).filter(Boolean).map(o => ({ ...o, id: Number(o.id) || o.id }));
-      if (fbOils.length > 0) { allOils = fbOils; saveOils(); changed = true; }
-    }
-  } catch(e) { console.warn('Firebase oils:', e); }
-
-  // — SMS CONFIG —
-  try {
-    const r = await FB.get('sms_config');
-    if (r.ok && r.data && typeof r.data === 'object' && Object.keys(r.data).length > 0) {
-      // DEFAULT_SMS ni asosiy qilib Firebase ma'lumotini ustiga qo'yamiz
-      smsConfig = { ...DEFAULT_SMS, ...smsConfig, ...r.data };
-      // firebase_enabled ni har doim true qilamiz
-      smsConfig.firebase_enabled = true;
-      saveSms();
-      changed = true;
-    }
-  } catch(e) { console.warn('Firebase sms_config:', e); }
-
-  if (changed) {
-    loadDashboard();
-    loadCarsGrid();
-    renderOilSel('oil-name');
-    // Agar SMS sahifasi ochiq bo'lsa — yangilash
-    const smsPage = document.getElementById('sms');
-    if (smsPage?.classList.contains('active')) loadSmsPage();
-    // Agar oils sahifasi ochiq bo'lsa — yangilash
-    const oilsPage = document.getElementById('oils');
-    if (oilsPage?.classList.contains('active')) loadOilsPage();
+    await loadFromBackend();
+  } catch (e) {
+    console.warn('Backend bootstrap xatosi:', e.message);
   }
 }
 
-// ===== FIREBASE — SAQLASH =====
+// ===== BACKEND — SAQLASH =====
 
 async function fbSaveCar(car) {
-  if (!smsConfig.firebase_enabled) return;
-  const r = await FB.put(`cars/car_${car.id}`, {
-    id: car.id, car_name: car.car_name, car_number: car.car_number,
-    phone_number: car.phone_number || '', total_km: car.total_km,
-    oil_name: car.oil_name, daily_km: car.daily_km || 50,
-    oil_change_km: car.oil_change_km,
-    antifreeze_km: car.antifreeze_km, antifreeze_interval: car.antifreeze_interval || 30000,
-    gearbox_km: car.gearbox_km,       gearbox_interval: car.gearbox_interval || 50000,
-    air_filter_km: car.air_filter_km || car.total_km,     air_filter_interval: car.air_filter_interval || 15000,
-    cabin_filter_km: car.cabin_filter_km || car.total_km, cabin_filter_interval: car.cabin_filter_interval || 15000,
-    oil_filter_km: car.oil_filter_km || car.total_km,     oil_filter_interval: car.oil_filter_interval || 10000,
-    history: car.history || [], added_at: car.added_at
-  });
-  if (r.ok) console.log('✅ FB cars: saqlandi', car.id);
-  else      console.warn('⚠️ FB cars xato:', r.status, r.error);
+  if (!isAuthenticated) return;
+  try {
+    await apiJson(`${BACKEND_URL}/api/cars`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(car) });
+  } catch (e) { console.warn('save car xato:', e.message); }
 }
 
 async function fbDeleteCar(carId) {
-  if (!smsConfig.firebase_enabled) return;
-  const r = await FB.delete(`cars/car_${carId}`);
-  if (r.ok) console.log('✅ FB cars: o\'chirildi', carId);
-  else      console.warn('⚠️ FB cars delete xato:', r.status);
+  if (!isAuthenticated) return;
+  try { await apiJson(`${BACKEND_URL}/api/cars/${carId}`, { method: 'DELETE' }); }
+  catch (e) { console.warn('delete car xato:', e.message); }
 }
 
 async function fbSaveServiceLog(car, type, km) {
-  if (!smsConfig.firebase_enabled) return;
-  const logId = `log_${Date.now()}`;
-  const r = await FB.put(`service_logs/${logId}`, {
-    car_name: car.car_name, car_number: car.car_number,
-    service_type: type, km_at_change: km,
-    changed_at: new Date().toISOString()
-  });
-  if (r.ok) console.log('✅ FB service_logs: saqlandi');
-  else      console.warn('⚠️ FB service_logs xato:', r.status);
+  return;
 }
 
-// ── OILS Firebase ga saqlash ──
+// ── OILS backendga saqlash ──
 async function fbSaveOil(oil) {
-  if (!smsConfig.firebase_enabled) return;
-  const r = await FB.put(`oils/oil_${oil.id}`, { id: oil.id, name: oil.name, interval: oil.interval });
-  if (r.ok) console.log('✅ FB oils: saqlandi', oil.name);
-  else      console.warn('⚠️ FB oils xato:', r.status);
+  if (!isAuthenticated) return;
+  try { await apiJson(`${BACKEND_URL}/api/oils`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(oil) }); }
+  catch (e) { console.warn('save oil xato:', e.message); }
 }
 
 async function fbDeleteOil(oilId) {
-  if (!smsConfig.firebase_enabled) return;
-  const r = await FB.delete(`oils/oil_${oilId}`);
-  if (r.ok) console.log('✅ FB oils: o\'chirildi', oilId);
-  else      console.warn('⚠️ FB oils delete xato:', r.status);
+  if (!isAuthenticated) return;
+  try { await apiJson(`${BACKEND_URL}/api/oils/${oilId}`, { method: 'DELETE' }); }
+  catch (e) { console.warn('delete oil xato:', e.message); }
 }
 
-// ── SMS CONFIG Firebase ga saqlash ──
-// ── SMS CONFIG saqlash — backend orqali (fallback: to'g'ridan Firebase) ──
+// ── SMS CONFIG backendga saqlash ──
 async function fbSaveSmsConfig() {
-  if (!smsConfig.firebase_enabled) return;
-
+  if (!isAuthenticated) return;
   const data = {
-    devsms_token:            smsConfig.devsms_token            || '',
-    enabled:                 smsConfig.enabled                 || false,
-    sms_sent_count:          smsConfig.sms_sent_count          || 0,
-    firebase_enabled:        true,
-    save_message:            smsConfig.save_message            || DEFAULT_SMS.save_message,
-    oil_message:             smsConfig.oil_message             || DEFAULT_SMS.oil_message,
-    gearbox_message:         smsConfig.gearbox_message         || DEFAULT_SMS.gearbox_message,
-    antifreeze_message:      smsConfig.antifreeze_message      || DEFAULT_SMS.antifreeze_message,
-    air_filter_message:      smsConfig.air_filter_message      || DEFAULT_SMS.air_filter_message,
-    cabin_filter_message:    smsConfig.cabin_filter_message    || DEFAULT_SMS.cabin_filter_message,
-    oil_filter_message:      smsConfig.oil_filter_message      || DEFAULT_SMS.oil_filter_message,
-    default_change_message:  smsConfig.default_change_message  || DEFAULT_SMS.default_change_message,
+    enabled: smsConfig.enabled || false,
+    test_phone: smsConfig.test_phone || '',
+    service_done_message: smsConfig.service_done_message || DEFAULT_SMS.service_done_message,
+    service_due_message: smsConfig.service_due_message || DEFAULT_SMS.service_due_message,
   };
-
-  // ── 1) Backend orqali urinish ─────────────────────────────
+  const tokenInput = document.getElementById('devsms-token');
+  const freshToken = tokenInput?.value?.trim();
+  if (freshToken) data.devsms_token = freshToken;
   try {
-    const r = await fetch(`${BACKEND_URL}/api/sms-config`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify(data),
-      signal:  AbortSignal.timeout(4000),
-    });
-    if (r.ok) {
-      console.log('✅ Backend: sms_config saqlandi (Firebase ga ham yozildi)');
-      return;
+    const res = await apiJson(`${BACKEND_URL}/api/sms-config`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    if (res.ok && res.config) {
+      smsConfig = { ...smsConfig, ...res.config };
+      saveSms();
+      if (tokenInput) tokenInput.value = '';
+      const note = document.getElementById('saved-token-note');
+      if (note) note.textContent = smsConfig.has_token ? `Saqlangan token: ${smsConfig.masked_token || 'mavjud'}` : 'Token hali saqlanmagan';
     }
-  } catch (e) {
-    console.warn('⚠️ Backend sms_config ishlamadi, fallback Firebase REST:', e.message);
-  }
-
-  // ── 2) Fallback: to'g'ridan Firebase REST ────────────────
-  const r = await FB.put('sms_config', data);
-  if (r.ok) console.log('✅ Firebase sms_config: saqlandi (fallback)');
-  else      console.warn('⚠️ Firebase sms_config xato:', r.status, r.error);
+  } catch (e) { console.warn('sms config xato:', e.message); }
 }
 
-// ── FIREBASE TEST ──
-async function testFirebase() {
-  const btn = document.getElementById('btn-test-firebase');
-  const res = document.getElementById('firebase-test-result');
-  btn.disabled  = true;
-  btn.className = 'btn-test-supa loading';
-  btn.innerHTML = '<span class="spin">⏳</span> Tekshirilmoqda...';
+// ── STORAGE TEST ──
+async function testDatabase() {
+  const btn = document.getElementById('btn-test-database');
+  const res = document.getElementById('database-test-result');
+  btn.disabled = true;
   res.style.display = 'block';
   res.className = 'supa-result loading';
-  res.innerHTML = '⏳ Firebase ga ulanmoqda...';
-
-  const result = await FB.get('_ping');
-
-  if (result.status === 0) {
-    btn.className = 'btn-test-supa fail';
-    btn.innerHTML = '❌ Ulanmadi';
-    res.className = 'supa-result fail';
-    res.innerHTML = `❌ <strong>Firebase ga ulanib bo'lmadi!</strong><br>
-      <span style="font-size:12px">Sabab: ${result.error || 'Tarmoq xatosi'}</span>`;
-  } else {
-    btn.className = 'btn-test-supa ok';
-    btn.innerHTML = '✅ Done — Ulanish ishlayapti';
+  res.innerHTML = '⏳ Tekshirilmoqda...';
+  try {
+    const result = await apiJson(`${BACKEND_URL}/api/storage/ping`);
     res.className = 'supa-result ok';
-    res.innerHTML = `✅ <strong>Done!</strong> Firebase ulanish muvaffaqiyatli.<br>
-      <span style="font-size:12px">${FIREBASE_URL}</span>`;
-    smsConfig.firebase_enabled = true;
-    saveSms();
-    // Ulanish muvaffaqiyatli — hozirgi ma'lumotlarni Firebase ga yuborish
-    await syncAllToFirebase();
+    res.innerHTML = `✅ Baza bilan aloqa yaxshi. Javob: ${result.ping_ms || 0} ms`;
+  } catch (e) {
+    res.className = 'supa-result fail';
+    res.innerHTML = `❌ Tekshiruvda xato: ${e.message}`;
+  } finally {
+    btn.disabled = false;
+    setTimeout(() => { res.style.display = 'none'; }, 5000);
   }
-  btn.disabled = false;
-  setTimeout(() => {
-    btn.className = 'btn-test-supa';
-    btn.innerHTML = '🔗 Ulanishni Tekshirish';
-    res.style.display = 'none';
-  }, 8000);
 }
 
-// Barcha local ma'lumotlarni Firebase ga yuborish
-async function syncAllToFirebase() {
-  showToast('🔄 Firebase ga sinxronlamoqda...', 'success');
-  // Cars
-  for (const car of allCars) { await fbSaveCar(car); }
-  // Oils
-  for (const oil of allOils) { await fbSaveOil(oil); }
-  // SMS config
+// Barcha joriy ma'lumotlarni backendga yuborish
+async function syncAllToDatabase() {
+  for (const car of allCars) await fbSaveCar(car);
+  for (const oil of allOils) await fbSaveOil(oil);
   await fbSaveSmsConfig();
-  showToast('✅ Firebase bilan sinxronlandi!', 'success');
 }
 
 // ===== NAVIGATION =====
@@ -501,77 +450,39 @@ function resetAddCarForm() {
 }
 
 // ===== SMS TEMPLATE =====
-function fillTemplate(tmpl, car, svcType) {
+function fillTemplate(tmpl, car, serviceName = '') {
   if (!tmpl) return '';
   return tmpl
-    .replace(/{car_name}/g,   car.car_name)
-    .replace(/{car_number}/g, car.car_number)
-    .replace(/{km}/g,         car.total_km.toLocaleString())
-    .replace(/{date}/g,        nowDate())
-    .replace(/{time}/g,        nowTime())
-    .replace(/{oil_brand}/g,   car.oil_name || '—');
+    .replace(/{car_name}/g, car.car_name || '')
+    .replace(/{car_number}/g, car.car_number || '')
+    .replace(/{km}/g, Number(car.total_km || 0).toLocaleString())
+    .replace(/{date}/g, nowDate())
+    .replace(/{service_name}/g, serviceName || 'Texnik xizmat');
 }
 function buildSaveSmsText(car, checkedKeys) {
-  const tmpl = smsConfig.save_message || DEFAULT_SMS.save_message;
-  const svcList = checkedKeys.map(k => { const m = SVC_META[k]; return m ? `${m.icon} ${m.label}` : k; }).join(', ');
-  return tmpl
-    .replace(/{car_name}/g,   car.car_name)
-    .replace(/{car_number}/g, car.car_number)
-    .replace(/{km}/g,         car.total_km.toLocaleString())
-    .replace(/{date}/g,        nowDate())
-    .replace(/{time}/g,        nowTime())
-    .replace(/{services}/g,    svcList || 'Ko\'rsatilmagan')
-    .replace(/{oil_brand}/g,   car.oil_name || '—');
+  const tmpl = smsConfig.service_done_message || DEFAULT_SMS.service_done_message;
+  const svcList = checkedKeys.map(k => { const m = SVC_META[k]; return m ? m.label : k; }).join(', ');
+  const serviceName = svcList ? `Xizmatlar qayd etildi: ${svcList}` : "Avtomobil ma'lumoti tizimga saqlandi";
+  return fillTemplate(tmpl, car, serviceName);
 }
 
 // ===== DEVSMS =====
-// ── SMS YUBORISH — backend orqali (fallback: to'g'ridan-to'g'ri) ──
-// BACKEND_URL ishlayotgan bo'lsa — /api/sms/send endpoint orqali ketadi.
-// Aks holda to'g'ridan-to'g'ri devsms.uz ga murojaat qiladi.
-
-async function sendSms(text, phone, logMeta = {}) {
-  const token = smsConfig.devsms_token;
-  if (!token || !phone) {
-    console.log(`📤 SMS (token yo'q) → ${phone}\n${text}`);
-    addSmsLog({ ok: false, phone, message: text, error: "Token yoki telefon raqam yo'q", ...logMeta });
-    return { ok: false };
+async function sendSms(text, phone, scheduleAt = '') {
+  const payload = { phone: normalizePhone(phone), message: text };
+  if (scheduleAt) payload.schedule_at = scheduleAt;
+  const data = await apiJson(`${BACKEND_URL}/api/sms/send`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (data.scheduled && data.item) {
+    scheduledSmsItems.unshift(data.item);
+    refreshScheduleList();
+    addSmsLog({ ok: true, phone, message: text, via: '⏰ Reja', time: new Date().toLocaleString('uz-UZ') });
+    return { ok: true, scheduled: true, item: data.item };
   }
-
-  // ── 1) Backend orqali urinish ─────────────────────────────
-  try {
-    const r = await fetch(`${BACKEND_URL}/api/sms/send`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ token, phone, message: text }),
-      signal:  AbortSignal.timeout(4000),
-    });
-    if (r.ok) {
-      const data = await r.json().catch(() => ({}));
-      console.log('📡 Backend SMS javob:', data);
-      addSmsLog({ ok: true, phone, message: text, via: '🖥️ Backend', ...logMeta });
-      return data;
-    }
-  } catch (e) {
-    console.warn('⚠️ Backend SMS ishlamadi, fallback:', e.message);
-  }
-
-  // ── 2) Fallback: to'g'ridan-to'g'ri devsms.uz ───────────
-  try {
-    const r = await fetch('https://devsms.uz/api/send_sms.php', {
-      method:  'POST',
-      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ phone: phone.replace(/\D/g, ''), message: text }),
-    });
-    const data = await r.json().catch(() => ({}));
-    const isOk = r.ok || data?.status === 'success' || data?.message_id;
-    console.log('DevSMS fallback javob:', data);
-    addSmsLog({ ok: isOk, phone, message: text, via: '📡 DevSMS direct', error: isOk ? undefined : JSON.stringify(data), ...logMeta });
-    return { ok: isOk, ...data };
-  } catch (e) {
-    console.warn('SMS xatosi (fallback):', e);
-    addSmsLog({ ok: false, phone, message: text, error: e.message, ...logMeta });
-    return { ok: false };
-  }
+  addSmsLog({ ok: !!data.ok, phone, message: text, via: '🖥️ Backend', error: data.error || '', time: new Date().toLocaleString('uz-UZ') });
+  return { ok: !!data.ok, data: data.devsms || {}, error: data.error || '' };
 }
 
 // ===== SMS LOG TIZIMI =====
@@ -594,10 +505,10 @@ function addSmsLog(entry) {
   renderSmsLog();
 }
 
-function renderSmsLog() {
+function renderSmsLog(items = null) {
   const el = document.getElementById('sms-log-list');
   if (!el) return;
-  const log = DB.get(SMS_LOG_KEY, []);
+  const log = Array.isArray(items) ? items : DB.get(SMS_LOG_KEY, []);
   if (log.length === 0) {
     el.innerHTML = '<div class="sms-log-empty">📭 Hozircha SMS yuborilmagan</div>';
     return;
@@ -634,7 +545,7 @@ function markSentToday(carId, type) {
   DB.set(SENT_TODAY_KEY, log);
 }
 async function autoCheckAndSend() {
-  if (!smsConfig.enabled || !smsConfig.devsms_token) return;
+  if (!smsConfig.enabled || !smsConfig.has_token) return;
   const svcs = [
     { key: 'oil',          getU: car => (car.total_km - car.oil_change_km) / oilInt(car.oil_name) },
     { key: 'antifreeze',   getU: car => (car.total_km - car.antifreeze_km) / (car.antifreeze_interval || 30000) },
@@ -649,9 +560,8 @@ async function autoCheckAndSend() {
       const u = svc.getU(car);
       if (u >= DPCT && !wasSentToday(car.id, svc.key)) {
         const svcLabel = SVC_META[svc.key]?.label || svc.key;
-        const tplKey   = svc.key + '_message';
-        const tmpl     = smsConfig[tplKey] || DEFAULT_SMS[tplKey] || DEFAULT_SMS.default_change_message;
-        const text     = fillTemplate(tmpl, car, svc.key).replace(/{service_label}/g, svcLabel);
+        const tmpl = smsConfig.service_due_message || DEFAULT_SMS.service_due_message;
+        const text = fillTemplate(tmpl, car, svcLabel);
         await sendSms(text, car.phone_number, { car_name: car.car_name, service: svcLabel + ' (avtomatik)' });
         markSentToday(car.id, svc.key);
         smsConfig.sms_sent_count = (smsConfig.sms_sent_count || 0) + 1;
@@ -708,18 +618,17 @@ document.getElementById('add-car-form').addEventListener('submit', async e => {
   });
 
   allCars.push(car); saveCars();
-  fbSaveCar(car); // Firebase ga saqlash
+  fbSaveCar(car); // Database ga saqlash
 
-  if (smsConfig.enabled && smsConfig.devsms_token && car.phone_number) {
-    // ── Backend orqali "mashina saqlash" SMS — Firebase dagi shablon bilan ──
+  if (smsConfig.enabled && smsConfig.has_token && car.phone_number) {
+    // ── Backend orqali "mashina saqlash" SMS — Database dagi shablon bilan ──
     let smsSent = false;
     try {
       const r = await fetch(`${BACKEND_URL}/api/sms/car-saved`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({
-          token:        smsConfig.devsms_token,
-          car:          { ...car },
+                    car:          { ...car },
           checked_keys: checkedKeys,
         }),
         signal: AbortSignal.timeout(8000),
@@ -765,7 +674,7 @@ document.getElementById('add-oil-form').addEventListener('submit', e => {
   if (!name || !interval) { showToast('❌ To\'ldiring', 'error'); return; }
   const oil = { id: DB.nextId('oil'), name, interval };
   allOils.push(oil); saveOils();
-  fbSaveOil(oil); // ← Firebase ga saqlash
+  fbSaveOil(oil); // ← Database ga saqlash
   showToast('✅ Moy turi qo\'shildi!', 'success');
   document.getElementById('add-oil-form').reset();
   loadOilsPage(); renderOilSel('oil-name');
@@ -773,7 +682,7 @@ document.getElementById('add-oil-form').addEventListener('submit', e => {
 function deleteOil(id) {
   if (!confirm('Moy turini o\'chirasizmi?')) return;
   allOils = allOils.filter(o => o.id !== id); saveOils();
-  fbDeleteOil(id); // ← Firebase dan o'chirish
+  fbDeleteOil(id); // ← Database dan o'chirish
   showToast('✅ O\'chirildi!', 'success');
   loadOilsPage(); renderOilSel('oil-name');
 }
@@ -810,12 +719,12 @@ function toggleTokenVisibility() {
   }
 })();
 
-// Backend va Firebase holatini tekshirish
+// Backend va ma'lumotlar bazasi holatini tekshirish
 async function checkBackendStatus() {
   const backendEl  = document.getElementById('sms-backend-status');
-  const firebaseEl = document.getElementById('sms-firebase-status');
+  const databaseEl = document.getElementById('sms-database-status');
   if (backendEl)  { backendEl.textContent  = '⏳...'; backendEl.style.color  = 'var(--text2)'; }
-  if (firebaseEl) { firebaseEl.textContent = '⏳...'; firebaseEl.style.color = 'var(--text2)'; }
+  if (databaseEl) { databaseEl.textContent = '⏳...'; databaseEl.style.color = 'var(--text2)'; }
   // Backend
   try {
     const r = await fetch(`${BACKEND_URL}/health`, { signal: AbortSignal.timeout(4000) });
@@ -827,71 +736,75 @@ async function checkBackendStatus() {
   } catch(e) {
     if (backendEl) { backendEl.textContent = '❌ Ulangan emas'; backendEl.style.color = 'var(--danger)'; }
   }
-  // Firebase
+  // Database
   try {
-    const r = await FB.get('_ping');
-    if (firebaseEl) {
-      firebaseEl.textContent = r.ok ? '✅ Ulangan' : '❌ Xato';
-      firebaseEl.style.color = r.ok ? 'var(--success)' : 'var(--danger)';
+    const r = await apiJson(`${BACKEND_URL}/api/storage/ping`);
+    if (databaseEl) {
+      databaseEl.textContent = r.ok ? '✅ Ulangan' : '❌ Xato';
+      databaseEl.style.color = r.ok ? 'var(--success)' : 'var(--danger)';
     }
   } catch(e) {
-    if (firebaseEl) { firebaseEl.textContent = '❌ Xato'; firebaseEl.style.color = 'var(--danger)'; }
+    if (databaseEl) { databaseEl.textContent = '❌ Xato'; databaseEl.style.color = 'var(--danger)'; }
   }
 }
 
 // Tezkor SMS yuborish
 async function quickSendSms() {
-  const phone   = document.getElementById('quick-sms-phone')?.value?.trim();
+  const phone = document.getElementById('quick-sms-phone')?.value?.trim();
   const message = document.getElementById('quick-sms-text')?.value?.trim();
+  const scheduleAt = document.getElementById('quick-sms-schedule')?.value || '';
   const resultEl = document.getElementById('quick-sms-result');
-
-  if (!smsConfig.devsms_token) {
-    showTmplResult(resultEl, 'fail', '❌ Avval DevSMS token kiriting (Sozlama tabidan)');
-    return;
-  }
-  if (!phone) { showTmplResult(resultEl, 'fail', '❌ Telefon raqam kiriting'); return; }
-  if (!message) { showTmplResult(resultEl, 'fail', '❌ Xabar matni kiriting'); return; }
-
-  showTmplResult(resultEl, 'loading', `⏳ ${phone} ga yuborilmoqda...`);
+  if (!smsConfig.has_token) { showTmplResult(resultEl, 'fail', '❌ Avval DevSMS token saqlang'); return; }
+  if (!phone || !message) { showTmplResult(resultEl, 'fail', '❌ Telefon va xabarni kiriting'); return; }
   try {
-    const r = await fetch(`${BACKEND_URL}/api/sms/send`, {
+    const data = await apiJson(`${BACKEND_URL}/api/sms/send`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: smsConfig.devsms_token, phone, message }),
-      signal: AbortSignal.timeout(10000),
+      body: JSON.stringify({ phone, message, schedule_at: scheduleAt || undefined }),
     });
-    const data = await r.json().catch(() => ({}));
-    if (data.ok) {
-      showTmplResult(resultEl, 'ok', `✅ SMS yuborildi → ${phone}\n<div class="preview">${escHtml(message)}</div>`);
-      addSmsLog({ ok: true, phone, message, via: '⚡ Tezkor' });
-      smsConfig.sms_sent_count = (smsConfig.sms_sent_count || 0) + 1;
-      saveSms(); updateSmsStats();
+    if (data.ok && data.scheduled) {
+      scheduledSmsItems.unshift(data.item);
+      refreshScheduleList();
       document.getElementById('quick-sms-text').value = '';
-    } else {
-      showTmplResult(resultEl, 'fail', `❌ Xato: ${data.error || JSON.stringify(data.devsms || {})}`);
-      addSmsLog({ ok: false, phone, message, via: '⚡ Tezkor', error: data.error });
+      if (document.getElementById('quick-sms-schedule')) document.getElementById('quick-sms-schedule').value = '';
+      showTmplResult(resultEl, 'ok', '⏰ SMS rejalashtirildi');
+      return;
     }
-  } catch(e) {
-    // Fallback
-    const res = await sendSms(message, phone, { via: '⚡ Tezkor (fallback)' });
-    if (res?.ok !== false) {
-      showTmplResult(resultEl, 'ok', `✅ SMS yuborildi (fallback) → ${phone}`);
+    if (data.ok) {
+      smsConfig.sms_sent_count = (smsConfig.sms_sent_count || 0) + 1;
+      saveSms();
+      document.getElementById('quick-sms-text').value = '';
+      if (document.getElementById('quick-sms-schedule')) document.getElementById('quick-sms-schedule').value = '';
+      showTmplResult(resultEl, 'ok', '✅ SMS muvaffaqiyatli yuborildi');
     } else {
-      showTmplResult(resultEl, 'fail', `❌ ${e.message || 'SMS yuborilmadi'}`);
+      showTmplResult(resultEl, 'fail', `❌ Xato: ${data.error || 'SMS yuborilmadi'}`);
     }
+  } catch (e) {
+    showTmplResult(resultEl, 'fail', `❌ Xato: ${e.message}`);
   }
 }
 
 // SMS statistikasini yangilash
-function updateSmsStats() {
+async function updateSmsStats() {
+  const sentEl  = document.getElementById('sms-sent-count');
+  const todayEl = document.getElementById('sms-stat-today');
+  const failEl  = document.getElementById('sms-stat-fail');
+  if (sentEl) sentEl.textContent = (smsConfig.sms_sent_count || 0).toLocaleString();
+  try {
+    const stats = await apiJson(`${BACKEND_URL}/api/sms/stats`);
+    if (stats.ok) {
+      smsConfig.sms_sent_count = Number(stats.total_sent || 0);
+      saveSms();
+      if (sentEl)  sentEl.textContent  = (smsConfig.sms_sent_count || 0).toLocaleString();
+      if (todayEl) todayEl.textContent = Number(stats.today_count || 0).toLocaleString();
+      if (failEl)  failEl.textContent  = Number(stats.fail_count || 0).toLocaleString();
+      return;
+    }
+  } catch (e) {}
   const log = DB.get(SMS_LOG_KEY, []);
   const today = new Date().toDateString();
   const todayCount = log.filter(e => new Date(e.ts || 0).toDateString() === today).length;
   const failCount  = log.filter(e => !e.ok).length;
-  const sentEl  = document.getElementById('sms-sent-count');
-  const todayEl = document.getElementById('sms-stat-today');
-  const failEl  = document.getElementById('sms-stat-fail');
-  if (sentEl)  sentEl.textContent  = (smsConfig.sms_sent_count || 0).toLocaleString();
   if (todayEl) todayEl.textContent = todayCount;
   if (failEl)  failEl.textContent  = failCount;
 }
@@ -900,10 +813,10 @@ function updateSmsStats() {
 function updateSmsHeaderStatus() {
   const el = document.getElementById('sms-header-status');
   if (!el) return;
-  if (smsConfig.enabled && smsConfig.devsms_token) {
+  if (smsConfig.enabled && smsConfig.has_token) {
     el.textContent = '✅ SMS faol — ' + (smsConfig.sms_sent_count || 0) + ' ta yuborilgan';
     el.style.color = 'var(--success)';
-  } else if (!smsConfig.devsms_token) {
+  } else if (!smsConfig.has_token) {
     el.textContent = '⚠️ Token kiritilmagan';
     el.style.color = 'var(--warning)';
   } else {
@@ -917,7 +830,7 @@ async function verifyToken() {
   const token  = document.getElementById('devsms-token')?.value?.trim();
   const resEl  = document.getElementById('token-verify-result');
   const btn    = document.querySelector('[onclick="verifyToken()"]');
-  if (!token) { showTmplResult(resEl, 'fail', '❌ Token kiriting'); return; }
+  if (!token) { showTmplResult(resEl, 'fail', '❌ Tekshirish uchun yangi token kiriting'); return; }
   showTmplResult(resEl, 'loading', '⏳ Token tekshirilmoqda...');
   if (btn) setBtnState(btn, 'loading', '⏳ Tekshirilmoqda...');
 
@@ -959,24 +872,38 @@ async function verifyToken() {
 }
 
 // SMS PAGE =====
+async function refreshSmsDataFromBackend() {
+  try {
+    const [logsResp, schedulesResp, statsResp] = await Promise.all([
+      apiJson(`${BACKEND_URL}/api/sms/logs?limit=80`),
+      apiJson(`${BACKEND_URL}/api/sms/schedules?limit=80`),
+      apiJson(`${BACKEND_URL}/api/sms/stats`),
+    ]);
+    if (logsResp.ok && Array.isArray(logsResp.logs)) renderSmsLog(logsResp.logs);
+    if (schedulesResp.ok && Array.isArray(schedulesResp.schedules)) {
+      scheduledSmsItems = schedulesResp.schedules;
+      refreshScheduleList();
+    }
+    if (statsResp.ok) {
+      smsConfig.sms_sent_count = Number(statsResp.total_sent || 0);
+      saveSms();
+    }
+  } catch (e) {
+    console.warn("SMS ma'lumotlarini yangilashda xato:", e.message);
+  }
+}
+
 function loadSmsPage() {
-  document.getElementById('devsms-token').value        = smsConfig.devsms_token  || '';
+  document.getElementById('devsms-token').value        = '';
+  const savedTokenNote = document.getElementById('saved-token-note');
+  if (savedTokenNote) savedTokenNote.textContent = smsConfig.has_token ? `Saqlangan token: ${smsConfig.masked_token || 'mavjud'}` : 'Token hali saqlanmagan';
   document.getElementById('sms-enabled').checked       = !!smsConfig.enabled;
-  const fbUrlEl = document.getElementById('firebase-url-display');
-  if (fbUrlEl) fbUrlEl.textContent = FIREBASE_URL;
-  const fbEnEl = document.getElementById('firebase-enabled');
-  if (fbEnEl) fbEnEl.checked = !!smsConfig.firebase_enabled;
-  document.getElementById('sms-save-message').value         = smsConfig.save_message         || DEFAULT_SMS.save_message;
-  document.getElementById('sms-oil-message').value          = smsConfig.oil_message          || DEFAULT_SMS.oil_message;
-  document.getElementById('sms-gearbox-message').value      = smsConfig.gearbox_message      || DEFAULT_SMS.gearbox_message;
-  document.getElementById('sms-antifreeze-message').value   = smsConfig.antifreeze_message   || DEFAULT_SMS.antifreeze_message;
-  document.getElementById('sms-air-filter-message').value   = smsConfig.air_filter_message   || DEFAULT_SMS.air_filter_message;
-  document.getElementById('sms-cabin-filter-message').value = smsConfig.cabin_filter_message || DEFAULT_SMS.cabin_filter_message;
-  document.getElementById('sms-oil-filter-message').value   = smsConfig.oil_filter_message   || DEFAULT_SMS.oil_filter_message;
+  document.getElementById('sms-service-done-message').value = smsConfig.service_done_message || DEFAULT_SMS.service_done_message;
+  document.getElementById('sms-service-due-message').value = smsConfig.service_due_message || DEFAULT_SMS.service_due_message;
   document.getElementById('sms-sent-count').textContent = (smsConfig.sms_sent_count || 0).toLocaleString();
 
   // Test telefon raqamini yuklash
-  const testPhoneVal = smsConfig.test_phone || DB.get('test_phone', '');
+  const testPhoneVal = smsConfig.test_phone || '';
   const tpInput = document.getElementById('test-phone-input');
   if (tpInput) tpInput.value = testPhoneVal;
   const tpStatus = document.getElementById('test-phone-status');
@@ -989,19 +916,23 @@ function loadSmsPage() {
 
   const ae = document.getElementById('sms-api-status');
   if (ae) {
-    ae.textContent = smsConfig.devsms_token ? '✅ Token kiritilgan' : '❌ Token kiritilmagan';
-    ae.style.color = smsConfig.devsms_token ? 'var(--success)' : 'var(--danger)';
+    ae.textContent = smsConfig.has_token ? '✅ Token backendda saqlangan' : '❌ Token kiritilmagan';
+    ae.style.color = smsConfig.has_token ? 'var(--success)' : 'var(--danger)';
   }
 
   const card = document.getElementById('sms-status-card');
   const el   = document.getElementById('sms-status');
-  if (smsConfig.enabled && smsConfig.devsms_token) { el.textContent = '✅ SMS faol'; card.classList.add('on'); }
-  else if (!smsConfig.devsms_token)                { el.textContent = '⚠️ DevSMS token kiritilmagan'; card.classList.remove('on'); }
+  if (smsConfig.enabled && smsConfig.has_token) { el.textContent = '✅ SMS faol'; card.classList.add('on'); }
+  else if (!smsConfig.has_token)                { el.textContent = '⚠️ DevSMS token kiritilmagan'; card.classList.remove('on'); }
   else                                              { el.textContent = '❌ SMS o\'chirilgan'; card.classList.remove('on'); }
 
   updateSmsStats();
   updateSmsHeaderStatus();
-  // Backend va Firebase holatini asinxron tekshiramiz
+  refreshSmsDataFromBackend().then(() => {
+    updateSmsStats();
+    updateSmsHeaderStatus();
+  });
+  // Backend va baza holatini asinxron tekshiramiz
   setTimeout(checkBackendStatus, 300);
 }
 document.getElementById('sms-config-form').addEventListener('submit', async e => {
@@ -1011,31 +942,24 @@ document.getElementById('sms-config-form').addEventListener('submit', async e =>
   // ── Loading holati ──
   if (saveBtn) setBtnState(saveBtn, 'loading', '⏳ Saqlanmoqda...');
 
-  smsConfig.devsms_token         = document.getElementById('devsms-token').value.trim();
   smsConfig.enabled              = document.getElementById('sms-enabled').checked;
-  smsConfig.firebase_enabled     = document.getElementById('firebase-enabled')?.checked ?? true;
-  smsConfig.save_message         = document.getElementById('sms-save-message').value;
-  smsConfig.oil_message          = document.getElementById('sms-oil-message').value;
-  smsConfig.gearbox_message      = document.getElementById('sms-gearbox-message').value;
-  smsConfig.antifreeze_message   = document.getElementById('sms-antifreeze-message').value;
-  smsConfig.air_filter_message   = document.getElementById('sms-air-filter-message').value;
-  smsConfig.cabin_filter_message = document.getElementById('sms-cabin-filter-message').value;
-  smsConfig.oil_filter_message   = document.getElementById('sms-oil-filter-message').value;
+  smsConfig.service_done_message = document.getElementById('sms-service-done-message').value;
+  smsConfig.service_due_message  = document.getElementById('sms-service-due-message').value;
 
   // ── Lokal saqlash ──
   saveSms();
 
-  // ── Firebase ga saqlash (async, xato bo'lsa ham davom etadi) ──
+  // ── Backendga saqlash ──
   try {
     await fbSaveSmsConfig();
   } catch(err) {
-    console.warn('Firebase saqlashda xato:', err);
+    console.warn('Backendga saqlashda xato:', err);
   }
 
-  startAutoCheck();
+  // startAutoCheck();
 
   // ── Token bo'lsa — balansni avtomatik tekshiramiz ──
-  if (smsConfig.devsms_token) {
+  if (document.getElementById('devsms-token').value.trim() || smsConfig.has_token) {
     const resEl = document.getElementById('token-verify-result');
     if (resEl) {
       showTmplResult(resEl, 'loading', '⏳ Token tekshirilmoqda...');
@@ -1056,14 +980,14 @@ document.getElementById('sms-config-form').addEventListener('submit', async e =>
 function resetSmsCount() {
   if (!confirm('Hisoblagichni nolga tiklaysizmi?')) return;
   smsConfig.sms_sent_count = 0; saveSms();
-  fbSaveSmsConfig(); // ← Firebase ga yangilash
+  fbSaveSmsConfig(); // ← Database ga yangilash
 
   showToast('✅ Tiklandi', 'success'); loadSmsPage();
 }
 
 // ===== SHABLON: ALOHIDA SAQLASH =====
 // Har bir shablon yonidagi "💾 Shablonni saqlash" tugmasi
-// shu funksiyani chaqiradi. Backend ga saqlaydi → Firebase ga yozadi.
+// shu funksiyani chaqiradi. Backend ga saqlaydi → Database ga yozadi.
 async function saveTemplate(templateKey, textareaId) {
   const btn = document.querySelector(`[onclick="saveTemplate('${templateKey}','${textareaId}')"]`);
   const resultEl = document.getElementById('tmpl-result-' + templateKey);
@@ -1082,7 +1006,7 @@ async function saveTemplate(templateKey, textareaId) {
   smsConfig[templateKey] = value;
   saveSms();
 
-  // Backend → Firebase ga saqlash
+  // Backend → Database ga saqlash
   let savedViaBackend = false;
   try {
     const payload = { ...smsConfig };
@@ -1099,7 +1023,7 @@ async function saveTemplate(templateKey, textareaId) {
       savedViaBackend = true;
       setBtnState(btn, 'ok', '✅ Saqlandi');
       showTmplResult(resultEl, 'ok',
-        `✅ Shablon backend + Firebase ga saqlandi.
+        `✅ Shablon backend + Database ga saqlandi.
 ` +
         `<div class="preview">${escHtml(value)}</div>`
       );
@@ -1107,19 +1031,8 @@ async function saveTemplate(templateKey, textareaId) {
       throw new Error('Backend ' + r.status);
     }
   } catch(e) {
-    // Fallback: to'g'ridan Firebase REST
-    const fbR = await FB.put('sms_config', { ...smsConfig });
-    if (fbR.ok) {
-      setBtnState(btn, 'ok', '✅ Saqlandi (Firebase)');
-      showTmplResult(resultEl, 'ok',
-        `✅ Shablon Firebase ga saqlandi (backend yo'q — fallback).
-` +
-        `<div class="preview">${escHtml(value)}</div>`
-      );
-    } else {
-      setBtnState(btn, 'fail', '❌ Xato');
-      showTmplResult(resultEl, 'fail', '❌ Saqlashda xato: ' + (e.message || "noma'lum"));
-    }
+    setBtnState(btn, 'fail', '❌ Xato');
+    showTmplResult(resultEl, 'fail', '❌ Saqlashda xato: ' + (e.message || "noma'lum"));
   }
   setTimeout(() => { setBtnState(btn, '', '💾 Shablonni saqlash'); }, 3000);
 }
@@ -1132,7 +1045,7 @@ async function testTemplate(templateKey, textareaId) {
   const resultEl = document.getElementById('tmpl-result-' + templateKey);
 
   // Token tekshir
-  if (!smsConfig.devsms_token) {
+  if (!smsConfig.has_token) {
     showTmplResult(resultEl, 'fail', "❌ Avval DevSMS token kiriting va saqlang");
     return;
   }
@@ -1165,8 +1078,7 @@ async function testTemplate(templateKey, textareaId) {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({
-        token:        smsConfig.devsms_token,
-        phone:        testPhone,
+                phone:        testPhone,
         template_key: templateKey,
         template_override: currentText,  // textarea dagi joriy matn
         car:          testCar,
@@ -1246,10 +1158,10 @@ function escHtml(s) {
 
 /** Saqlangan test raqamini qaytaradi */
 function getTestPhone() {
-  return smsConfig.test_phone || DB.get('test_phone', '');
+  return smsConfig.test_phone || '';
 }
 
-/** Test raqamini saqlaydi — local + Firebase */
+/** Test raqamini saqlaydi — backend orqali */
 async function saveTestPhone() {
   const input = document.getElementById('test-phone-input');
   const btn   = document.getElementById('btn-save-test-phone');
@@ -1266,7 +1178,6 @@ async function saveTestPhone() {
   btn.textContent = '⏳...';
 
   smsConfig.test_phone = phone;
-  DB.set('test_phone', phone);
   saveSms();
 
   try {
@@ -1277,7 +1188,11 @@ async function saveTestPhone() {
       signal:  AbortSignal.timeout(4000),
     });
   } catch(e) {
-    await FB.put('sms_config', smsConfig);
+    status.textContent = '❌ Saqlashda xato';
+    status.style.color = 'var(--danger)';
+    btn.classList.remove('loading');
+    btn.textContent = '💾 Saqlash';
+    return;
   }
 
   btn.classList.remove('loading');
@@ -1412,7 +1327,7 @@ async function editorSave() {
   smsConfig[_editorKey] = value;
   saveSms();
 
-  // Backend/Firebase ga saqlash
+  // Backend/Database ga saqlash
   let ok = false;
   try {
     const r = await fetch(`${BACKEND_URL}/api/sms-config`, {
@@ -1423,13 +1338,11 @@ async function editorSave() {
     });
     ok = r.ok;
   } catch(e) {
-    const fbR = await FB.put('sms_config', smsConfig);
-    ok = fbR.ok;
   }
 
   if (ok) {
     setBtnState(btn, 'ok', '✅ Saqlandi');
-    showTmplResult(resEl, 'ok', '✅ Shablon saqlandi va Firebase ga yuborildi');
+    showTmplResult(resEl, 'ok', '✅ Shablon saqlandi');
     setTimeout(() => closeEditor(), 1200);
   } else {
     setBtnState(btn, 'fail', '❌ Xato');
@@ -1443,7 +1356,7 @@ async function editorTestSms() {
   const btn   = document.getElementById('emod-btn-test');
   const resEl = document.getElementById('emod-result');
 
-  if (!smsConfig.devsms_token) {
+  if (!smsConfig.has_token) {
     showTmplResult(resEl, 'fail', '❌ DevSMS token kiritilmagan');
     return;
   }
@@ -1473,8 +1386,7 @@ async function editorTestSms() {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({
-        token:             smsConfig.devsms_token,
-        phone:             testPhone,
+                phone:             testPhone,
         template_key:      _editorKey,
         template_override: currentText,
         car:               testCar,
@@ -1561,7 +1473,7 @@ function openModal() {
 
   loadHistory();
   const hint = document.getElementById('sms-hint');
-  if (smsConfig.enabled && smsConfig.devsms_token) {
+  if (smsConfig.enabled && smsConfig.has_token) {
     hint.innerHTML = '💬 SMS yoqilgan — almashtirish bosilganda avtomatik yuboriladi';
     hint.style.display = 'block';
   } else hint.style.display = 'none';
@@ -1605,7 +1517,7 @@ document.getElementById('btn-update-km').addEventListener('click', () => {
   if (!km || km < 0) { showToast('❌ KM to\'g\'ri kiriting', 'error'); return; }
   curCar.total_km = km;
   allCars = allCars.map(c => c.id === curCar.id ? curCar : c); saveCars();
-  fbSaveCar(curCar); // ← Firebase yangilash
+  fbSaveCar(curCar); // ← Database yangilash
   showToast('✅ Probeg yangilandi!', 'success'); openModal(); loadDashboard();
 });
 
@@ -1624,21 +1536,20 @@ document.getElementById('btn-change-svc').addEventListener('click', async () => 
   curCar.history.push({ type, km, oil_name: type === 'oil' ? oilName : null, date: new Date().toISOString() });
   allCars = allCars.map(c => c.id === curCar.id ? curCar : c); saveCars();
 
-  fbSaveCar(curCar);           // ← Firebase mashina yangilash
-  fbSaveServiceLog(curCar, type, km); // ← Firebase xizmat log
+  fbSaveCar(curCar);           // ← Database mashina yangilash
+  fbSaveServiceLog(curCar, type, km); // ← Database xizmat log
 
-  if (smsConfig.enabled && smsConfig.devsms_token) {
+  if (smsConfig.enabled && smsConfig.has_token) {
     const svcLabel = SVC_META[type]?.label || type;
 
-    // ── Backend orqali SMS yuborish — shablon Firebase dagi versiyadan olinadi ──
+    // ── Backend orqali SMS yuborish — shablon Database dagi versiyadan olinadi ──
     let smsSent = false;
     try {
       const r = await fetch(`${BACKEND_URL}/api/sms/service-change`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({
-          token:        smsConfig.devsms_token,
-          car:          { ...curCar },
+                    car:          { ...curCar },
           service_type: type,
         }),
         signal: AbortSignal.timeout(8000),
@@ -1651,15 +1562,7 @@ document.getElementById('btn-change-svc').addEventListener('click', async () => 
         console.warn('⚠️ Backend SMS xato:', data.error);
       }
     } catch(e) {
-      console.warn('⚠️ Backend ishlamadi, fallback:', e.message);
-    }
-
-    // ── Fallback: local shablon bilan to'g'ridan ──────────────
-    if (!smsSent) {
-      const tplKey = type + '_message';
-      const tmpl   = smsConfig[tplKey] || DEFAULT_SMS[tplKey] || DEFAULT_SMS.default_change_message;
-      const filled = fillTemplate(tmpl, curCar, type).replace(/{service_label}/g, svcLabel);
-      await sendSms(filled, curCar.phone_number);
+      console.warn('⚠️ Backend SMS yuborishda xato:', e.message);
     }
 
     smsConfig.sms_sent_count = (smsConfig.sms_sent_count || 0) + 1;
@@ -1673,7 +1576,7 @@ document.getElementById('btn-change-svc').addEventListener('click', async () => 
 
 document.getElementById('btn-delete-car').addEventListener('click', () => {
   if (!confirm('Mashinani o\'chirasizmi?')) return;
-  fbDeleteCar(curCar.id); // ← Firebase dan o'chirish
+  fbDeleteCar(curCar.id); // ← Database dan o'chirish
   allCars = allCars.filter(c => c.id !== curCar.id); saveCars();
   document.getElementById('car-modal').classList.remove('active');
   showToast('✅ Mashina o\'chirildi!', 'success'); loadDashboard(); loadCarsGrid();
@@ -1689,6 +1592,7 @@ function saveThresholds() {
   const w = parseFloat(document.getElementById('setting-warn').value);
   const d = parseFloat(document.getElementById('setting-danger').value);
   WPCT = w/100; DPCT = d/100; cfg.warn_pct = w; cfg.danger_pct = d; saveCfg();
+  apiJson(`${BACKEND_URL}/api/cfg`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg) }).catch(() => {});
   showToast('✅ Saqlandi', 'success'); loadDashboard();
 }
 function exportData() {
@@ -1699,7 +1603,7 @@ function exportData() {
 }
 function confirmClear() {
   if (!confirm('Barcha ma\'lumotlarni o\'chirasizmi?')) return;
-  ['cars','oils','_id_car','_id_oil'].forEach(k => localStorage.removeItem('mt_' + k));
+sessionStorage.clear();
   allCars = []; allOils = []; saveCars(); saveOils();
   showToast('✅ Tozalandi', 'success'); loadDashboard(); closeSettings();
 }
@@ -1711,17 +1615,69 @@ function showToast(msg, type = 'success') {
   setTimeout(() => t.classList.remove('show'), 3000);
 }
 
+
+function refreshScheduleList() {
+  const el = document.getElementById('scheduled-sms-list');
+  if (!el) return;
+  const items = [...scheduledSmsItems].sort((a, b) => new Date(b.scheduled_for || b.created_at || 0) - new Date(a.scheduled_for || a.created_at || 0));
+  if (!items.length) {
+    el.innerHTML = '<div class="sms-log-empty">⏰ Rejalashtirilgan SMS yo‘q</div>';
+    return;
+  }
+  const statusMap = {
+    pending: '🕒 Kutilmoqda',
+    retry: '🔁 Qayta urinadi',
+    processing: '⏳ Yuborilmoqda',
+    sent: '✅ Yuborildi',
+    delivered: '📬 Yetkazildi',
+    failed: '❌ Xato',
+    missed: '⚠️ O‘tkazib yuborildi',
+    cancelled: '🚫 Bekor qilindi',
+  };
+  el.innerHTML = items.map(item => {
+    const canCancel = ['pending', 'retry'].includes(item.status);
+    const when = item.scheduled_for ? new Date(item.scheduled_for).toLocaleString('uz-UZ') : '—';
+    const statusText = statusMap[item.status] || item.status || '—';
+    const err = item.last_error ? `<div class="sched-sub">${escHtml(item.last_error)}</div>` : '';
+    return `
+      <div class="sched-item">
+        <div>
+          <div class="sched-title">📱 ${item.phone}</div>
+          <div class="sched-sub">${when}</div>
+          <div class="sched-sub">${statusText}</div>
+          ${err}
+        </div>
+        ${canCancel ? `<button class="sched-del" onclick="cancelScheduledSms('${item.id}')">Bekor qilish</button>` : ''}
+      </div>
+    `;
+  }).join('');
+}
+async function cancelScheduledSms(id) {
+  try {
+    await apiJson(`${BACKEND_URL}/api/sms/schedules/${id}`, { method: 'DELETE' });
+    scheduledSmsItems = scheduledSmsItems.filter(item => item.id !== id);
+    refreshScheduleList();
+    showToast('✅ Reja bekor qilindi', 'success');
+  } catch (e) {
+    showToast('❌ Bekor qilib bo‘lmadi', 'error');
+  }
+}
+
 // ===== INIT =====
 function init() {
   applyTheme();
-  document.getElementById('setting-warn').value   = cfg.warn_pct;
+  document.getElementById('setting-warn').value = cfg.warn_pct;
   document.getElementById('setting-danger').value = cfg.danger_pct;
   if (!DB.get('oils_init', false)) { saveOils(); DB.set('oils_init', true); }
-  // 1) LocalStorage dan tez ko'rsatish
   loadDashboard();
   renderOilSel('oil-name');
-  // 2) Firebase dan yangilash (orqa fonda)
-  loadFromFirebase();
-  startAutoCheck();
+  const pinBtn = document.getElementById('pin-submit');
+  const pinInput = document.getElementById('pin-input');
+  pinBtn?.addEventListener('click', doPinLogin);
+  pinInput?.addEventListener('keydown', (e) => { if (e.key === 'Enter') doPinLogin(); });
+  checkAuth().then(async ok => {
+    if (ok) { unlockApp(); await loadFromBackend(); }
+    else { lockApp(); }
+  });
 }
 init();

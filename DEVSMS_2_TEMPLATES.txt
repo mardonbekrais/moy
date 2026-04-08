@@ -1,0 +1,9 @@
+1) Xizmat bajarildi
+Hurmatli mijoz, {car_name} ({car_number}) avtomobili bo'yicha quyidagi ma'lumot qayd etildi: {service_name}.
+Sana: {date}.
+Joriy probeg: {km} km.
+
+2) Xizmat muddati keldi
+Hurmatli mijoz, {car_name} ({car_number}) avtomobili bo'yicha quyidagi xizmatni bajarish tavsiya etiladi: {service_name}.
+Sana: {date}.
+Joriy probeg: {km} km.

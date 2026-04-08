@@ -1,399 +1,928 @@
-// ================================================================
-// MOYTRACK BACKEND  —  server.js
-// Express + Firebase REST + devsms.uz
-// Node.js · v4.5 Pro
-// ================================================================
-
 require('dotenv').config();
 const express = require('express');
-const cors    = require('cors');
-const path    = require('path');
-
-const app = express();
-app.use(cors());
-app.use(express.json());
-
-const FIREBASE_URL = process.env.FIREBASE_URL || 'https://gilamuz-8308f-default-rtdb.firebaseio.com';
-const PORT         = process.env.PORT || 3001;
-
-const DEFAULT_SMS = {
-  save_message:           '{car_name} ({car_number}) saqlandi!\n📅 {date} {time}\n🔧 Almashtirildi: {services}\n🏁 Probeg: {km} km',
-  oil_message:            '{car_name} ({car_number}) — dvigatel moyi: {oil_brand}\n📅 {date} {time} · 🏁 {km} km',
-  gearbox_message:        '{car_name} ({car_number}) — karobka moyi yangilandi\n📅 {date} {time} · 🏁 {km} km',
-  antifreeze_message:     '{car_name} ({car_number}) — antifriz yangilandi\n📅 {date} {time} · 🏁 {km} km',
-  air_filter_message:     '{car_name} ({car_number}) — havo filtr almashtirildi\n📅 {date} {time} · 🏁 {km} km',
-  cabin_filter_message:   '{car_name} ({car_number}) — salon filtr almashtirildi\n📅 {date} {time} · 🏁 {km} km',
-  oil_filter_message:     '{car_name} ({car_number}) — moy filtr almashtirildi\n📅 {date} {time} · 🏁 {km} km',
-  default_change_message: '{car_name} ({car_number}) — {service_label} almashtirildi\n📅 {date} {time} · 🏁 {km} km',
-};
-
-const SVC_META = {
-  oil:          { icon: '🛢️', label: 'Dvigatel Moyi' },
-  antifreeze:   { icon: '🔵', label: 'Antifriz'       },
-  gearbox:      { icon: '🟢', label: 'Karobka Moyi'   },
-  air_filter:   { icon: '💨', label: 'Havo Filtr'     },
-  cabin_filter: { icon: '🌬️', label: 'Salon Filtr'    },
-  oil_filter:   { icon: '🔩', label: 'Moy Filtr'      },
-};
-
-function nowDate() {
-  return new Date().toLocaleDateString('uz-UZ', { year: 'numeric', month: '2-digit', day: '2-digit' });
-}
-function nowTime() {
-  return new Date().toLocaleTimeString('uz-UZ', { hour: '2-digit', minute: '2-digit' });
-}
-function fillTemplate(tmpl, car, svcType, svcList) {
-  if (!tmpl) return '';
-  const svcLabel = SVC_META[svcType]?.label || svcType || '';
-  return tmpl
-    .replace(/{car_name}/g,     car.car_name    || '')
-    .replace(/{car_number}/g,   car.car_number   || '')
-    .replace(/{km}/g,           (car.total_km || 0).toLocaleString('uz-UZ'))
-    .replace(/{date}/g,          nowDate())
-    .replace(/{time}/g,          nowTime())
-    .replace(/{oil_brand}/g,     car.oil_name    || '—')
-    .replace(/{services}/g,      svcList         || "Ko'rsatilmagan")
-    .replace(/{service_label}/g, svcLabel);
-}
+const cors = require('cors');
+const path = require('path');
+const crypto = require('crypto');
 
 const fetch = (...args) => import('node-fetch').then(({ default: f }) => f(...args));
 
+const app = express();
+app.use(cors({ origin: true, credentials: true }));
+app.use(express.json({ limit: '1mb' }));
+
+const PORT = Number(process.env.PORT || 3001);
+const FIREBASE_URL = String(process.env.FIREBASE_URL || 'https://gilamuz-8308f-default-rtdb.firebaseio.com').replace(/\/+$/, '');
+const ALLOW_FIREBASE_REST_FALLBACK = String(process.env.ALLOW_FIREBASE_REST_FALLBACK || 'false').toLowerCase() === 'true';
+const TZ = process.env.TZ || 'Asia/Tashkent';
+const APP_PIN = String(process.env.APP_PIN || '1234');
+const SESSION_SECRET = String(process.env.SESSION_SECRET || 'change-this-secret');
+const COOKIE_NAME = 'mt_session';
+const COOKIE_MAX_AGE_SEC = Number(process.env.SESSION_MAX_AGE_SEC || 60 * 60 * 12);
+const AUTH_WINDOW_MS = Number(process.env.AUTH_WINDOW_MS || 10 * 60 * 1000);
+const AUTH_MAX_ATTEMPTS = Number(process.env.AUTH_MAX_ATTEMPTS || 8);
+const DEVSMS_BASE = 'https://devsms.uz/api';
+const DEVSMS_TOKEN = String(process.env.DEVSMS_TOKEN || '').trim();
+const AUTO_CHECK_MINUTES = Math.max(5, Number(process.env.AUTO_CHECK_MINUTES || 30));
+const SCHEDULER_POLL_SECONDS = Math.max(15, Number(process.env.SCHEDULER_POLL_SECONDS || 30));
+const QUEUE_PROCESSING_TIMEOUT_SEC = Math.max(60, Number(process.env.QUEUE_PROCESSING_TIMEOUT_SEC || 300));
+const MAX_SEND_RETRIES = Math.max(0, Number(process.env.MAX_SEND_RETRIES || 3));
+const RETRY_BASE_SECONDS = Math.max(15, Number(process.env.RETRY_BASE_SECONDS || 60));
+const MAX_SCHEDULE_LAG_MINUTES = Math.max(0, Number(process.env.MAX_SCHEDULE_LAG_MINUTES || 1440));
+const STATUS_SYNC_BATCH = Math.max(1, Math.min(20, Number(process.env.STATUS_SYNC_BATCH || 12)));
+const STATUS_SYNC_SECONDS = Math.max(60, Number(process.env.STATUS_SYNC_SECONDS || 180));
+
+let adminDb = null;
+let adminReady = false;
+function initFirebaseAdmin() {
+  if (adminReady) return adminDb;
+  adminReady = true;
+  try {
+    const admin = require('firebase-admin');
+    if (!admin.apps.length) {
+      const rawJson = String(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '').trim();
+      if (!rawJson) throw new Error('FIREBASE_SERVICE_ACCOUNT_JSON kiritilmagan');
+      const serviceAccount = JSON.parse(rawJson);
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
+        databaseURL: FIREBASE_URL,
+      });
+    }
+    adminDb = require('firebase-admin/database').getDatabase();
+  } catch (e) {
+    adminDb = null;
+    if (ALLOW_FIREBASE_REST_FALLBACK) {
+      console.warn('[firebase] Admin SDK ishga tushmadi, vaqtinchalik REST fallback ishlatiladi:', e.message);
+    } else {
+      console.error('[firebase] Admin SDK ishga tushmadi. Production uchun FIREBASE_SERVICE_ACCOUNT_JSON majburiy:', e.message);
+    }
+  }
+  return adminDb;
+}
+initFirebaseAdmin();
+
+const DEFAULT_SMS = {
+  enabled: false,
+  test_phone: '',
+  sms_sent_count: 0,
+  service_done_message: "Hurmatli mijoz, {car_name} ({car_number}) avtomobili bo'yicha quyidagi ma'lumot qayd etildi: {service_name}.\nSana: {date}.\nJoriy probeg: {km} km.",
+  service_due_message: "Hurmatli mijoz, {car_name} ({car_number}) avtomobili bo'yicha quyidagi xizmatni bajarish tavsiya etiladi: {service_name}.\nSana: {date}.\nJoriy probeg: {km} km.",
+};
+const DEFAULT_CFG = { warn_pct: 80, danger_pct: 100, theme: 'dark' };
+const DEFAULT_OILS = [
+  { id: 1, name: 'SAE 5W-30', interval: 10000 },
+  { id: 2, name: 'SAE 5W-40', interval: 7000 },
+  { id: 3, name: 'SAE 10W-40', interval: 8000 },
+];
+const SVC_META = {
+  oil: { icon: '', label: 'Dvigatel moyi' },
+  antifreeze: { icon: '', label: 'Antifriz' },
+  gearbox: { icon: '', label: 'Karobka moyi' },
+  air_filter: { icon: '', label: 'Havo filtri' },
+  cabin_filter: { icon: '', label: 'Salon filtri' },
+  oil_filter: { icon: '', label: 'Moy filtri' },
+};
+
+const authAttempts = new Map();
+const workerState = { queueRunning: false, autoRunning: false, statusRunning: false, lastKickAt: 0 };
+
+function dtf(date = new Date()) {
+  return new Intl.DateTimeFormat('sv-SE', {
+    timeZone: TZ,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+  }).format(date).replace(' ', 'T');
+}
+function nowDate() { return dtf().slice(0, 10).split('-').reverse().join('.'); }
+function nowTime() { return dtf().slice(11, 16); }
+function nowIso() { return new Date().toISOString(); }
+function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+function parseMaybeNumber(v, fallback = 0) { const n = Number(v); return Number.isFinite(n) ? n : fallback; }
+function cleanPhone(phone = '') { return String(phone).replace(/\D/g, ''); }
+function normalizeUzPhone(phone = '') {
+  const p = cleanPhone(phone);
+  if (p.startsWith('998') && p.length === 12) return p;
+  if (p.length === 9) return '998' + p;
+  return p;
+}
+function maskedToken(token = '') {
+  if (!token) return '';
+  if (token.length <= 8) return '••••••••';
+  return `${token.slice(0, 4)}••••${token.slice(-4)}`;
+}
+function objectValuesSorted(data) {
+  if (!data || typeof data !== 'object') return [];
+  return Object.values(data).filter(Boolean);
+}
+function stableId(prefix) {
+  return `${prefix}_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+}
+function sign(value) {
+  return crypto.createHmac('sha256', SESSION_SECRET).update(value).digest('hex');
+}
+function makeSessionCookie() {
+  const issued = Date.now();
+  const exp = issued + (COOKIE_MAX_AGE_SEC * 1000);
+  const nonce = crypto.randomBytes(12).toString('hex');
+  const payload = `${issued}.${exp}.${nonce}`;
+  return `${payload}.${sign(payload)}`;
+}
+function verifySessionCookie(raw = '') {
+  const parts = String(raw).split('.');
+  if (parts.length < 4) return false;
+  const payload = `${parts[0]}.${parts[1]}.${parts[2]}`;
+  if (sign(payload) !== parts[3]) return false;
+  const exp = Number(parts[1]);
+  if (!Number.isFinite(exp) || Date.now() > exp) return false;
+  return true;
+}
+function parseCookies(header = '') {
+  const out = {};
+  for (const part of String(header).split(';')) {
+    const idx = part.indexOf('=');
+    if (idx === -1) continue;
+    out[part.slice(0, idx).trim()] = decodeURIComponent(part.slice(idx + 1).trim());
+  }
+  return out;
+}
+function setCookie(res, name, value, maxAgeSec = COOKIE_MAX_AGE_SEC) {
+  const parts = [
+    `${name}=${encodeURIComponent(value)}`,
+    'Path=/',
+    'HttpOnly',
+    'SameSite=Lax',
+    `Max-Age=${maxAgeSec}`,
+  ];
+  res.setHeader('Set-Cookie', parts.join('; '));
+}
+function clearCookie(res, name) {
+  res.setHeader('Set-Cookie', `${name}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+}
+function getRequesterIp(req) {
+  const xf = req.headers['x-forwarded-for'];
+  return String(Array.isArray(xf) ? xf[0] : (xf || req.ip || req.socket?.remoteAddress || 'unknown')).split(',')[0].trim();
+}
+function isTransientStatus(status) { return status === 408 || status === 425 || status === 429 || status >= 500; }
+function isTransientError(err = '') {
+  const s = String(err || '').toLowerCase();
+  return s.includes('timeout') || s.includes('tempor') || s.includes('network') || s.includes('fetch') || s.includes('econn') || s.includes('429');
+}
+function queueRetryDelayMs(attempt) {
+  const clamped = Math.max(0, attempt - 1);
+  return RETRY_BASE_SECONDS * 1000 * Math.min(16, 2 ** clamped);
+}
+function requireAuth(req, res, next) {
+  const cookies = parseCookies(req.headers.cookie || '');
+  if (!verifySessionCookie(cookies[COOKIE_NAME])) {
+    return res.status(401).json({ ok: false, error: 'PIN talab qilinadi' });
+  }
+  next();
+}
+function scheduleWorkerKick() {
+  const now = Date.now();
+  if (now - workerState.lastKickAt < 2000) return;
+  workerState.lastKickAt = now;
+  setTimeout(() => { processScheduledQueue().catch(console.error); }, 25);
+  setTimeout(() => { syncRecentStatuses().catch(console.error); }, 50);
+}
+
 async function fbGet(p) {
+  const db = initFirebaseAdmin();
+  if (db) {
+    try {
+      const snap = await db.ref(p).get();
+      return { ok: true, status: 200, data: snap.exists() ? snap.val() : null };
+    } catch (e) { return { ok: false, status: 0, error: e.message, data: null }; }
+  }
+  if (!ALLOW_FIREBASE_REST_FALLBACK) return { ok: false, status: 0, error: 'Firebase Admin SDK ulanmagan', data: null };
   try {
     const r = await fetch(`${FIREBASE_URL}/${p}.json`);
-    if (!r.ok) return { ok: false, status: r.status, data: null };
-    const data = await r.json();
-    return { ok: true, data };
-  } catch (e) { return { ok: false, error: e.message }; }
+    const data = await r.json().catch(() => null);
+    return { ok: r.ok, status: r.status, data };
+  } catch (e) { return { ok: false, status: 0, error: e.message, data: null }; }
 }
 async function fbPut(p, body) {
+  const db = initFirebaseAdmin();
+  if (db) {
+    try {
+      await db.ref(p).set(body);
+      return { ok: true, status: 200, data: body };
+    } catch (e) { return { ok: false, status: 0, error: e.message, data: null }; }
+  }
+  if (!ALLOW_FIREBASE_REST_FALLBACK) return { ok: false, status: 0, error: 'Firebase Admin SDK ulanmagan', data: null };
   try {
     const r = await fetch(`${FIREBASE_URL}/${p}.json`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     });
     const data = await r.json().catch(() => null);
     return { ok: r.ok, status: r.status, data };
-  } catch (e) { return { ok: false, error: e.message }; }
+  } catch (e) { return { ok: false, status: 0, error: e.message, data: null }; }
 }
 async function fbPatch(p, body) {
+  const db = initFirebaseAdmin();
+  if (db) {
+    try {
+      await db.ref(p).update(body);
+      return { ok: true, status: 200, data: body };
+    } catch (e) { return { ok: false, status: 0, error: e.message, data: null }; }
+  }
+  if (!ALLOW_FIREBASE_REST_FALLBACK) return { ok: false, status: 0, error: 'Firebase Admin SDK ulanmagan', data: null };
   try {
     const r = await fetch(`${FIREBASE_URL}/${p}.json`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     });
     const data = await r.json().catch(() => null);
     return { ok: r.ok, status: r.status, data };
-  } catch (e) { return { ok: false, error: e.message }; }
+  } catch (e) { return { ok: false, status: 0, error: e.message, data: null }; }
+}
+async function fbDelete(p) {
+  const db = initFirebaseAdmin();
+  if (db) {
+    try {
+      await db.ref(p).remove();
+      return { ok: true, status: 200 };
+    } catch (e) { return { ok: false, status: 0, error: e.message }; }
+  }
+  if (!ALLOW_FIREBASE_REST_FALLBACK) return { ok: false, status: 0, error: 'Firebase Admin SDK ulanmagan', data: null };
+  try {
+    const r = await fetch(`${FIREBASE_URL}/${p}.json`, { method: 'DELETE' });
+    return { ok: r.ok, status: r.status };
+  } catch (e) { return { ok: false, status: 0, error: e.message }; }
 }
 
-async function sendSms(token, phone, message) {
-  if (!token || !phone || !message) return { ok: false, error: 'Parametr yetishmaydi' };
-  const cleanPhone = phone.replace(/\D/g, '');
+async function getCars() {
+  const r = await fbGet('cars');
+  const cars = objectValuesSorted(r.data).map((c) => ({ ...c, id: parseMaybeNumber(c.id, c.id) }));
+  return { ok: r.ok, cars };
+}
+async function getOils() {
+  const r = await fbGet('oils');
+  let oils = objectValuesSorted(r.data).map((o) => ({ ...o, id: parseMaybeNumber(o.id, o.id), interval: parseMaybeNumber(o.interval, 10000) }));
+  if (!oils.length) {
+    await Promise.all(DEFAULT_OILS.map((o) => fbPut(`oils/oil_${o.id}`, o)));
+    oils = [...DEFAULT_OILS];
+  }
+  return { ok: true, oils };
+}
+async function getSmsConfig() {
+  const r = await fbGet('sms_config');
+  const legacy = r.data || {};
+  const config = {
+    ...DEFAULT_SMS,
+    ...legacy,
+    devsms_token: String(legacy.devsms_token || DEVSMS_TOKEN || '').trim(),
+  };
+  if (!config.service_done_message) config.service_done_message = DEFAULT_SMS.service_done_message;
+  if (!config.service_due_message) config.service_due_message = DEFAULT_SMS.service_due_message;
+  return { ok: true, config };
+}
+async function getCfg() {
+  const r = await fbGet('cfg');
+  return { ok: true, cfg: { ...DEFAULT_CFG, ...(r.data || {}) } };
+}
+function publicSmsConfig(config) {
+  return {
+    ...config,
+    devsms_token: '',
+    has_token: !!config.devsms_token,
+    masked_token: config.devsms_token ? maskedToken(config.devsms_token) : '',
+  };
+}
+function sanitizeCar(body = {}) {
+  const total_km = parseMaybeNumber(body.total_km, 0);
+  return {
+    id: body.id ?? Date.now(),
+    car_name: String(body.car_name || '').trim(),
+    car_number: String(body.car_number || '').trim().toUpperCase(),
+    phone_number: normalizeUzPhone(body.phone_number || ''),
+    total_km,
+    oil_name: String(body.oil_name || '').trim(),
+    daily_km: parseMaybeNumber(body.daily_km, 50),
+    oil_change_km: parseMaybeNumber(body.oil_change_km, total_km),
+    antifreeze_km: parseMaybeNumber(body.antifreeze_km, total_km),
+    antifreeze_interval: parseMaybeNumber(body.antifreeze_interval, 30000),
+    gearbox_km: parseMaybeNumber(body.gearbox_km, total_km),
+    gearbox_interval: parseMaybeNumber(body.gearbox_interval, 50000),
+    air_filter_km: parseMaybeNumber(body.air_filter_km, total_km),
+    air_filter_interval: parseMaybeNumber(body.air_filter_interval, 15000),
+    cabin_filter_km: parseMaybeNumber(body.cabin_filter_km, total_km),
+    cabin_filter_interval: parseMaybeNumber(body.cabin_filter_interval, 15000),
+    oil_filter_km: parseMaybeNumber(body.oil_filter_km, total_km),
+    oil_filter_interval: parseMaybeNumber(body.oil_filter_interval, 10000),
+    history: Array.isArray(body.history) ? body.history : [],
+    added_at: body.added_at || nowIso(),
+  };
+}
+function sanitizeOil(body = {}) {
+  return { id: body.id ?? Date.now(), name: String(body.name || '').trim(), interval: parseMaybeNumber(body.interval, 10000) };
+}
+function fillTemplate(tmpl, car, serviceName = '') {
+  return String(tmpl || '')
+    .replace(/{car_name}/g, car.car_name || '')
+    .replace(/{car_number}/g, car.car_number || '')
+    .replace(/{km}/g, String(parseMaybeNumber(car.total_km, 0)))
+    .replace(/{date}/g, nowDate())
+    .replace(/{service_name}/g, serviceName || 'Texnik xizmat');
+}
+function sanitizeQueueItem(item = {}) {
+  return {
+    ...item,
+    phone: normalizeUzPhone(item.phone || ''),
+    message: String(item.message || '').trim(),
+    status: String(item.status || 'pending'),
+    attempt_count: parseMaybeNumber(item.attempt_count, 0),
+    scheduled_for: item.scheduled_for || nowIso(),
+    created_at: item.created_at || nowIso(),
+    next_attempt_at: item.next_attempt_at || item.scheduled_for || nowIso(),
+    request_id: item.request_id || '',
+    sms_id: item.sms_id || '',
+    last_error: item.last_error || '',
+  };
+}
+async function getQueue() {
+  const r = await fbGet('sms_queue');
+  const items = objectValuesSorted(r.data).map(sanitizeQueueItem);
+  items.sort((a, b) => new Date(a.next_attempt_at || a.scheduled_for || 0) - new Date(b.next_attempt_at || b.scheduled_for || 0));
+  return items;
+}
+async function upsertQueue(item) {
+  const normalized = sanitizeQueueItem(item);
+  await fbPut(`sms_queue/${normalized.id}`, normalized);
+  return normalized;
+}
+async function saveSmsLog(entry, explicitId = '') {
+  const id = explicitId || stableId('sms');
+  const payload = {
+    id,
+    provider_status: entry.provider_status || '',
+    queue_status: entry.queue_status || '',
+    type: entry.type || 'direct',
+    phone: normalizeUzPhone(entry.phone || ''),
+    message: String(entry.message || '').trim(),
+    ok: entry.ok !== false,
+    error: entry.error || '',
+    request_id: entry.request_id || '',
+    sms_id: entry.sms_id || '',
+    status_checked_at: entry.status_checked_at || '',
+    car_name: entry.car_name || '',
+    service_key: entry.service_key || '',
+    service_type: entry.service_type || '',
+    queue_id: entry.queue_id || '',
+    callback_status: entry.callback_status || '',
+    callback_payload: entry.callback_payload || null,
+    devsms_response: entry.devsms_response || null,
+    timestamp: entry.timestamp || nowIso(),
+    date: entry.date || nowDate(),
+    time: entry.time || nowTime(),
+  };
+  await fbPut(`sms_logs/${id}`, payload);
+  if (payload.request_id || payload.sms_id) {
+    await saveProviderIndex(payload, id);
+  }
+  return payload;
+}
+async function patchSmsLog(id, patch = {}) {
+  if (!id) return null;
+  const current = await fbGet(`sms_logs/${id}`);
+  const next = { ...(current.data || {}), ...patch, id };
+  await fbPut(`sms_logs/${id}`, next);
+  if (next.request_id || next.sms_id) await saveProviderIndex(next, id);
+  return next;
+}
+async function saveProviderIndex(log, logId) {
+  const queueId = log.queue_id || '';
+  if (log.request_id) await fbPut(`sms_provider_index/request_${log.request_id}`, { log_id: logId, queue_id: queueId, updated_at: nowIso() });
+  if (log.sms_id) await fbPut(`sms_provider_index/sms_${log.sms_id}`, { log_id: logId, queue_id: queueId, updated_at: nowIso() });
+}
+async function findProviderIndex({ request_id = '', sms_id = '' }) {
+  if (request_id) {
+    const a = await fbGet(`sms_provider_index/request_${request_id}`);
+    if (a.data) return a.data;
+  }
+  if (sms_id) {
+    const b = await fbGet(`sms_provider_index/sms_${sms_id}`);
+    if (b.data) return b.data;
+  }
+  return null;
+}
+async function incrementSmsCount(add = 1) {
+  const { config } = await getSmsConfig();
+  const next = parseMaybeNumber(config.sms_sent_count, 0) + add;
+  await fbPatch('sms_config', { sms_sent_count: next, updated_at: nowIso() });
+  return next;
+}
+async function updateQueueStatus(queueId, patch = {}) {
+  if (!queueId) return null;
+  const current = await fbGet(`sms_queue/${queueId}`);
+  if (!current.data) return null;
+  const merged = { ...current.data, ...patch, id: queueId, updated_at: nowIso() };
+  await fbPut(`sms_queue/${queueId}`, merged);
+  return merged;
+}
+
+async function sendDevSms({ phone, message, from, callback_url, type }, token) {
+  if (!token) return { ok: false, error: 'DevSMS token kiritilmagan', status: 0, data: null };
+  const payload = { phone: normalizeUzPhone(phone), message: String(message || '').trim() };
+  if (from) payload.from = from;
+  if (callback_url) payload.callback_url = callback_url;
+  if (type) payload.type = type;
   try {
-    const r = await fetch('https://devsms.uz/api/send_sms.php', {
+    const r = await fetch(`${DEVSMS_BASE}/send_sms.php`, {
       method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone: cleanPhone, message }),
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
     });
     const data = await r.json().catch(() => ({}));
-    const isOk = r.ok || data?.status === 'success' || !!data?.message_id;
-    console.log(`📤 SMS → ${cleanPhone}: ${r.status}`, data);
-    return { ok: isOk, status: r.status, data };
+    const ok = !!(r.ok && data.success !== false);
+    return {
+      ok,
+      status: r.status,
+      data,
+      provider_status: data?.data?.status || data?.status || '',
+      request_id: data?.data?.request_id || data?.request_id || '',
+      sms_id: String(data?.data?.sms_id || data?.data?.id || data?.sms_id || data?.id || ''),
+      error: ok ? '' : (data.error || data.message || `HTTP ${r.status}`),
+    };
   } catch (e) {
-    console.error('SMS xatosi:', e.message);
-    return { ok: false, error: e.message };
+    return { ok: false, status: 0, data: null, provider_status: '', request_id: '', sms_id: '', error: e.message };
   }
 }
-
-async function saveSmsLog(entry) {
+async function verifyDevSmsToken(token) {
   try {
-    const logId = `sms_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-    await fbPut(`sms_logs/${logId}`, { ...entry, timestamp: new Date().toISOString(), date: nowDate(), time: nowTime() });
-  } catch(e) { console.warn('SMS log xatosi:', e.message); }
+    const r = await fetch(`${DEVSMS_BASE}/get_balance.php`, { headers: { Authorization: `Bearer ${token}` } });
+    const data = await r.json().catch(() => ({}));
+    const ok = !!(r.ok && data.success !== false);
+    const balance = data?.data?.balance ?? data?.balance ?? data?.data?.amount ?? data?.amount ?? null;
+    return { ok, status: r.status, balance, data };
+  } catch (e) {
+    return { ok: false, status: 0, error: e.message, data: null, balance: null };
+  }
 }
-
-async function incrementSmsCount(config, count) {
-  count = count || 1;
-  const newCount = (config.sms_sent_count || 0) + count;
-  await fbPatch('sms_config', { sms_sent_count: newCount });
-  return newCount;
+async function getDevSmsStatus({ request_id = '', sms_id = '' }, token) {
+  if (!token) return { ok: false, error: 'DevSMS token kiritilmagan' };
+  const query = request_id ? `request_id=${encodeURIComponent(request_id)}` : `sms_id=${encodeURIComponent(sms_id)}`;
+  try {
+    const r = await fetch(`${DEVSMS_BASE}/get_status.php?${query}`, { headers: { Authorization: `Bearer ${token}` } });
+    const data = await r.json().catch(() => ({}));
+    const ok = !!(r.ok && data.success !== false);
+    return {
+      ok,
+      status: r.status,
+      data,
+      provider_status: data?.data?.status || data?.status || '',
+      error: ok ? '' : (data.error || data.message || `HTTP ${r.status}`),
+      request_id: data?.data?.eskiz_request_id || data?.data?.request_id || request_id || '',
+      sms_id: String(data?.data?.id || data?.data?.sms_id || sms_id || ''),
+    };
+  } catch (e) {
+    return { ok: false, status: 0, data: null, provider_status: '', error: e.message, request_id, sms_id };
+  }
 }
-
-// ── ROUTES ──────────────────────────────────────────────────────
-
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', service: 'MoyTrack Backend', version: '4.5', firebase: FIREBASE_URL, time: new Date().toISOString(), uptime: Math.floor(process.uptime()) + 's', node: process.version });
-});
-
-app.get('/api', (req, res) => {
-  res.json({
-    service: 'MoyTrack API', version: '4.5',
-    endpoints: [
-      'GET  /health', 'GET  /api',
-      'GET  /api/sms-config', 'POST /api/sms-config',
-      'POST /api/sms/test', 'POST /api/sms/send', 'POST /api/sms/bulk',
-      'POST /api/sms/service-change', 'POST /api/sms/car-saved', 'POST /api/sms/auto-check',
-      'POST /api/sms/verify-token', 'POST /api/sms/reset-count',
-      'GET  /api/sms/stats', 'GET  /api/sms/logs', 'DELETE /api/sms/logs',
-      'GET  /api/firebase/ping',
-    ],
+async function sendMessageWithConfig({ phone, message, type = 'direct', meta = {} }) {
+  const { config } = await getSmsConfig();
+  if (!config.enabled) return { ok: false, error: 'SMS o‘chirilgan', status: 0, data: null };
+  const sent = await sendDevSms({ phone, message, callback_url: process.env.SMS_CALLBACK_URL || undefined }, config.devsms_token);
+  const log = await saveSmsLog({
+    type,
+    phone,
+    message,
+    ok: sent.ok,
+    error: sent.error || '',
+    request_id: sent.request_id,
+    sms_id: sent.sms_id,
+    provider_status: sent.provider_status || (sent.ok ? 'sent' : ''),
+    devsms_response: sent.data || null,
+    ...meta,
   });
-});
+  if (sent.ok) await incrementSmsCount(1);
+  return { ...sent, log_id: log.id };
+}
 
-app.get('/api/sms-config', async (req, res) => {
-  const r = await fbGet('sms_config');
-  if (!r.ok) return res.status(502).json({ error: 'Firebase xatosi', detail: r.error });
-  res.json({ ok: true, config: { ...DEFAULT_SMS, ...(r.data || {}) } });
-});
-
-app.post('/api/sms-config', async (req, res) => {
-  const body = req.body || {};
-  const data = {
-    devsms_token: body.devsms_token ?? '', enabled: body.enabled ?? false,
-    firebase_enabled: true, sms_sent_count: body.sms_sent_count ?? 0,
-    test_phone: body.test_phone || '',
-    save_message: body.save_message || DEFAULT_SMS.save_message,
-    oil_message: body.oil_message || DEFAULT_SMS.oil_message,
-    gearbox_message: body.gearbox_message || DEFAULT_SMS.gearbox_message,
-    antifreeze_message: body.antifreeze_message || DEFAULT_SMS.antifreeze_message,
-    air_filter_message: body.air_filter_message || DEFAULT_SMS.air_filter_message,
-    cabin_filter_message: body.cabin_filter_message || DEFAULT_SMS.cabin_filter_message,
-    oil_filter_message: body.oil_filter_message || DEFAULT_SMS.oil_filter_message,
-    default_change_message: body.default_change_message || DEFAULT_SMS.default_change_message,
-    updated_at: new Date().toISOString(),
-  };
-  const r = await fbPut('sms_config', data);
-  if (!r.ok) return res.status(502).json({ error: 'Firebase saqlashda xato', detail: r.error });
-  console.log('✅ sms_config Firebase ga saqlandi');
-  res.json({ ok: true, message: 'Shablonlar saqlandi', data });
-});
-
-app.post('/api/sms/test', async (req, res) => {
-  const { token, phone, template_key, template_override, car } = req.body || {};
-  if (!token || !phone || !template_key) return res.status(400).json({ ok: false, error: 'token, phone, template_key majburiy' });
-  const cfgRes = await fbGet('sms_config');
-  const config = { ...DEFAULT_SMS, ...(cfgRes.data || {}) };
-  const tmpl = template_override?.trim() || config[template_key] || DEFAULT_SMS[template_key] || DEFAULT_SMS.default_change_message;
-  const testCar = { car_name: car?.car_name || 'Nexia 3', car_number: car?.car_number || '01A 123BC', total_km: car?.total_km || 85000, oil_name: car?.oil_name || 'SAE 5W-30' };
-  const svcType = template_key.replace('_message', '');
-  const text = fillTemplate(tmpl, testCar, svcType, SVC_META[svcType]?.label || svcType);
-  const smsRes = await sendSms(token, phone, text);
-  await saveSmsLog({ type: 'test', template_key, phone, message: text, ok: smsRes.ok, error: smsRes.error });
-  res.json({ ok: smsRes.ok, sent_to: phone, text, template_used: tmpl, template_source: template_override ? 'override' : 'firebase', devsms: smsRes.data, error: smsRes.error });
-});
-
-app.post('/api/sms/send', async (req, res) => {
-  const { token, phone, message } = req.body || {};
-  if (!token || !phone || !message) return res.status(400).json({ ok: false, error: 'token, phone, message majburiy' });
-  const smsRes = await sendSms(token, phone, message);
-  if (smsRes.ok) { const cfgRes = await fbGet('sms_config'); if (cfgRes.ok && cfgRes.data) await incrementSmsCount(cfgRes.data); }
-  await saveSmsLog({ type: 'direct', phone, message, ok: smsRes.ok, error: smsRes.error });
-  res.json({ ok: smsRes.ok, sent_to: phone, devsms: smsRes.data, error: smsRes.error });
-});
-
-app.post('/api/sms/bulk', async (req, res) => {
-  const { token, phones = [], message, delay_ms = 300 } = req.body || {};
-  if (!token || !phones.length || !message) return res.status(400).json({ ok: false, error: 'token, phones, message majburiy' });
-  if (phones.length > 100) return res.status(400).json({ ok: false, error: 'Maksimum 100 ta raqam' });
-  const results = [];
-  let okCount = 0;
-  for (const phone of phones) {
-    const smsRes = await sendSms(token, phone, message);
-    results.push({ phone, ok: smsRes.ok, error: smsRes.error });
-    if (smsRes.ok) okCount++;
-    if (delay_ms > 0) await new Promise(r => setTimeout(r, delay_ms));
-  }
-  if (okCount > 0) { const cfgRes = await fbGet('sms_config'); if (cfgRes.ok && cfgRes.data) await incrementSmsCount(cfgRes.data, okCount); }
-  await saveSmsLog({ type: 'bulk', phones_count: phones.length, message, ok: okCount > 0, ok_count: okCount });
-  console.log(`📤 Bulk SMS: ${okCount}/${phones.length}`);
-  res.json({ ok: true, total: phones.length, sent: okCount, failed: phones.length - okCount, results });
-});
-
-app.post('/api/sms/service-change', async (req, res) => {
-  const { car, service_type, token } = req.body || {};
-  if (!car || !service_type) return res.status(400).json({ error: 'car, service_type majburiy' });
-  const cfgRes = await fbGet('sms_config');
-  const config = { ...DEFAULT_SMS, ...(cfgRes.data || {}) };
-  const smsToken = token || config.devsms_token;
-  if (!smsToken)         return res.status(400).json({ error: 'devsms_token yoq' });
-  if (!config.enabled)   return res.status(400).json({ error: 'SMS ochirilgan' });
-  if (!car.phone_number) return res.status(400).json({ error: 'car.phone_number yoq' });
-  const svcLabel = SVC_META[service_type]?.label || service_type;
-  const tplKey   = service_type + '_message';
-  const tmpl     = config[tplKey] || DEFAULT_SMS[tplKey] || DEFAULT_SMS.default_change_message;
-  const text     = fillTemplate(tmpl, car, service_type, svcLabel);
-  const smsRes   = await sendSms(smsToken, car.phone_number, text);
-  if (smsRes.ok) await incrementSmsCount(config);
-  await saveSmsLog({ type: 'service_change', service_type, car_name: car.car_name, phone: car.phone_number, message: text, ok: smsRes.ok, error: smsRes.error });
-  res.json({ ok: smsRes.ok, sent_to: car.phone_number, service_type, text, devsms: smsRes.data, error: smsRes.error });
-});
-
-app.post('/api/sms/car-saved', async (req, res) => {
-  const { car, checked_keys = [], token } = req.body || {};
-  if (!car) return res.status(400).json({ error: 'car majburiy' });
-  const cfgRes = await fbGet('sms_config');
-  const config = { ...DEFAULT_SMS, ...(cfgRes.data || {}) };
-  const smsToken = token || config.devsms_token;
-  if (!smsToken || !config.enabled || !car.phone_number)
-    return res.status(400).json({ error: 'Token yoq, SMS ochirilgan yoki telefon yoq' });
-  const svcList = checked_keys.map(k => { const m = SVC_META[k]; return m ? `${m.icon} ${m.label}` : k; }).join(', ');
-  const text = fillTemplate(config.save_message || DEFAULT_SMS.save_message, car, '', svcList);
-  const smsRes = await sendSms(smsToken, car.phone_number, text);
-  if (smsRes.ok) await incrementSmsCount(config);
-  await saveSmsLog({ type: 'car_saved', car_name: car.car_name, phone: car.phone_number, message: text, ok: smsRes.ok, error: smsRes.error });
-  res.json({ ok: smsRes.ok, sent_to: car.phone_number, text, devsms: smsRes.data, error: smsRes.error });
-});
-
-app.post('/api/sms/auto-check', async (req, res) => {
-  const { cars = [], oils = [] } = req.body || {};
-  const cfgRes = await fbGet('sms_config');
-  const config = { ...DEFAULT_SMS, ...(cfgRes.data || {}) };
-  if (!config.enabled || !config.devsms_token) return res.json({ ok: false, message: 'SMS yoqilmagan', sent: [] });
-  const oilInt = name => { const o = oils.find(o => o.name === name); return o ? o.interval : 10000; };
-  const sent = [];
-  for (const car of cars) {
-    if (!car.phone_number) continue;
-    const checks = [
-      { key: 'oil',          u: (car.total_km - car.oil_change_km) / oilInt(car.oil_name) },
-      { key: 'antifreeze',   u: (car.total_km - car.antifreeze_km) / (car.antifreeze_interval || 30000) },
-      { key: 'gearbox',      u: (car.total_km - car.gearbox_km) / (car.gearbox_interval || 50000) },
-      { key: 'air_filter',   u: (car.total_km - (car.air_filter_km || car.total_km)) / (car.air_filter_interval || 15000) },
-      { key: 'cabin_filter', u: (car.total_km - (car.cabin_filter_km || car.total_km)) / (car.cabin_filter_interval || 15000) },
-      { key: 'oil_filter',   u: (car.total_km - (car.oil_filter_km || car.total_km)) / (car.oil_filter_interval || 10000) },
-    ];
-    for (const svc of checks) {
-      if (svc.u >= 1.0) {
-        const svcLabel = SVC_META[svc.key]?.label || svc.key;
-        const tmpl = config[svc.key + '_message'] || DEFAULT_SMS[svc.key + '_message'] || DEFAULT_SMS.default_change_message;
-        const text = fillTemplate(tmpl, car, svc.key, svcLabel);
-        const smsRes = await sendSms(config.devsms_token, car.phone_number, text);
-        await saveSmsLog({ type: 'auto_check', service_key: svc.key, car_name: car.car_name, phone: car.phone_number, message: text, ok: smsRes.ok, error: smsRes.error });
-        sent.push({ car_name: car.car_name, service: svc.key, ok: smsRes.ok, text, error: smsRes.error });
+function oilIntervalByName(oils, name) {
+  return objectValuesSorted(oils).find((o) => o.name === name)?.interval || 10000;
+}
+async function processAutoReminders() {
+  if (workerState.autoRunning) return;
+  workerState.autoRunning = true;
+  try {
+    const { config } = await getSmsConfig();
+    if (!config.enabled || !config.devsms_token) return;
+    const cars = (await getCars()).cars;
+    const oils = (await getOils()).oils;
+    const dateKey = nowDate();
+    for (const car of cars) {
+      if (!car.phone_number) continue;
+      const checks = [
+        { key: 'oil', used: (car.total_km - car.oil_change_km), interval: oilIntervalByName(oils, car.oil_name) },
+        { key: 'antifreeze', used: (car.total_km - car.antifreeze_km), interval: car.antifreeze_interval || 30000 },
+        { key: 'gearbox', used: (car.total_km - car.gearbox_km), interval: car.gearbox_interval || 50000 },
+        { key: 'air_filter', used: (car.total_km - (car.air_filter_km || car.total_km)), interval: car.air_filter_interval || 15000 },
+        { key: 'cabin_filter', used: (car.total_km - (car.cabin_filter_km || car.total_km)), interval: car.cabin_filter_interval || 15000 },
+        { key: 'oil_filter', used: (car.total_km - (car.oil_filter_km || car.total_km)), interval: car.oil_filter_interval || 10000 },
+      ];
+      for (const svc of checks) {
+        if (!(svc.interval > 0 && (svc.used / svc.interval) >= 1)) continue;
+        const reminderKey = `${dateKey}_${car.id}_${svc.key}`;
+        const exists = await fbGet(`auto_sms_sent/${reminderKey}`);
+        if (exists.ok && exists.data) continue;
+        const serviceName = SVC_META[svc.key]?.label || svc.key;
+        const text = fillTemplate(config.service_due_message || DEFAULT_SMS.service_due_message, car, serviceName);
+        const sent = await sendMessageWithConfig({ phone: car.phone_number, message: text, type: 'auto_check', meta: { service_key: svc.key, car_name: car.car_name } });
+        if (sent.ok) await fbPut(`auto_sms_sent/${reminderKey}`, { id: reminderKey, car_id: car.id, service_key: svc.key, created_at: nowIso() });
+        await sleep(250);
       }
     }
+  } finally {
+    workerState.autoRunning = false;
   }
-  const okCount = sent.filter(s => s.ok).length;
-  if (okCount > 0) await incrementSmsCount(config, okCount);
-  res.json({ ok: true, checked: cars.length, sent_count: sent.length, ok_count: okCount, sent });
-});
+}
+async function processScheduledQueue() {
+  if (workerState.queueRunning) return;
+  workerState.queueRunning = true;
+  try {
+    const items = await getQueue();
+    const now = Date.now();
+    const staleBefore = now - (QUEUE_PROCESSING_TIMEOUT_SEC * 1000);
+    for (const item of items) {
+      if (!['pending', 'retry', 'processing'].includes(item.status)) continue;
+      const scheduledTs = new Date(item.scheduled_for || 0).getTime();
+      const nextAttemptTs = new Date(item.next_attempt_at || item.scheduled_for || 0).getTime();
+      const pickedTs = new Date(item.picked_at || 0).getTime();
 
-app.post('/api/sms/verify-token', async (req, res) => {
-  const { token } = req.body || {};
-  if (!token) return res.status(400).json({ ok: false, error: 'token majburiy' });
+      if (item.status === 'processing' && pickedTs && pickedTs > staleBefore) continue;
+      if (!Number.isFinite(scheduledTs)) continue;
+      if (now < nextAttemptTs) continue;
+      if (now < scheduledTs) continue;
 
-  // Ikkala endpointni ham sinab ko'ramiz
-  const endpoints = [
-    'https://devsms.uz/api/get_balance.php',
-    'https://devsms.uz/api/balance.php',
-  ];
+      const lagMinutes = (now - scheduledTs) / 60000;
+      if (MAX_SCHEDULE_LAG_MINUTES > 0 && lagMinutes > MAX_SCHEDULE_LAG_MINUTES) {
+        await upsertQueue({ ...item, status: 'missed', processed_at: nowIso(), last_error: 'Backend uzoq vaqt uxlagani uchun yuborilmadi' });
+        await saveSmsLog({ type: 'scheduled', phone: item.phone, message: item.message, ok: false, error: 'Schedule muddati o‘tib ketgan', provider_status: 'missed', queue_status: 'missed', queue_id: item.id, car_name: item.car_name || '' });
+        continue;
+      }
 
-  for (const url of endpoints) {
-    try {
-      const r = await fetch(url, {
-        method: 'GET',
-        headers: { 'Authorization': 'Bearer ' + token },
-        signal: AbortSignal.timeout(8000),
+      const locked = await upsertQueue({
+        ...item,
+        status: 'processing',
+        picked_at: nowIso(),
+        attempt_count: parseMaybeNumber(item.attempt_count, 0) + 1,
+        queue_status: 'processing',
       });
-      const text = await r.text();
-      let data = {};
-      try { data = JSON.parse(text); } catch(_) { data = { raw: text }; }
 
-      console.log(`[verify-token] ${url} | HTTP ${r.status} | raw=${text.slice(0,300)}`);
-
-      // Balansni har qanday formatdan olamiz
-      const balance =
-        data?.data?.balance ??
-        data?.balance ??
-        data?.data?.amount ??
-        data?.amount ??
-        null;
-
-      // Token to'g'ri deb hisoblash shartlari
-      const isOk =
-        data?.success === true ||
-        data?.status === 'success' ||
-        balance !== null ||
-        (r.ok && r.status === 200 && !data?.error && !data?.message?.toLowerCase().includes('invalid'));
-
-      if (r.status !== 404) {
-        // 404 bo'lmasa javob qaytaramiz (endpoint topildi)
-        return res.json({ ok: isOk, balance, http_status: r.status, endpoint: url, data });
+      const sent = await sendMessageWithConfig({ phone: item.phone, message: item.message, type: 'scheduled', meta: { queue_id: item.id, car_name: item.car_name || '', queue_status: 'processing' } });
+      if (sent.ok) {
+        await upsertQueue({
+          ...locked,
+          status: 'sent',
+          processed_at: nowIso(),
+          request_id: sent.request_id,
+          sms_id: sent.sms_id,
+          last_error: '',
+          last_log_id: sent.log_id,
+          provider_status: sent.provider_status || 'sent',
+          queue_status: 'sent',
+        });
+        if (sent.log_id) await patchSmsLog(sent.log_id, { queue_status: 'sent', provider_status: sent.provider_status || 'sent', queue_id: item.id });
+      } else {
+        const shouldRetry = (locked.attempt_count <= MAX_SEND_RETRIES) && (isTransientStatus(sent.status || 0) || isTransientError(sent.error || ''));
+        const nextStatus = shouldRetry ? 'retry' : 'failed';
+        const nextAttempt = shouldRetry ? new Date(Date.now() + queueRetryDelayMs(locked.attempt_count)).toISOString() : '';
+        await upsertQueue({
+          ...locked,
+          status: nextStatus,
+          processed_at: nowIso(),
+          next_attempt_at: nextAttempt || locked.next_attempt_at,
+          last_error: sent.error || 'SMS yuborilmadi',
+          last_log_id: sent.log_id || locked.last_log_id || '',
+          provider_status: sent.provider_status || '',
+          queue_status: nextStatus,
+        });
+        if (sent.log_id) await patchSmsLog(sent.log_id, { queue_status: nextStatus, provider_status: sent.provider_status || '', queue_id: item.id });
       }
-    } catch (e) {
-      console.warn(`[verify-token] ${url} xato:`, e.message);
+      await sleep(250);
     }
+  } finally {
+    workerState.queueRunning = false;
   }
+}
+async function syncRecentStatuses() {
+  if (workerState.statusRunning) return;
+  workerState.statusRunning = true;
+  try {
+    const { config } = await getSmsConfig();
+    if (!config.enabled || !config.devsms_token) return;
+    const logSnap = await fbGet('sms_logs');
+    const logs = objectValuesSorted(logSnap.data)
+      .filter((l) => (l.request_id || l.sms_id) && !['delivered', 'failed'].includes(l.provider_status || l.callback_status || ''))
+      .sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0))
+      .slice(0, STATUS_SYNC_BATCH);
+    for (const log of logs) {
+      const checkedTs = new Date(log.status_checked_at || 0).getTime();
+      if (checkedTs && (Date.now() - checkedTs) < STATUS_SYNC_SECONDS * 1000) continue;
+      const status = await getDevSmsStatus({ request_id: log.request_id, sms_id: log.sms_id }, config.devsms_token);
+      if (status.ok && status.provider_status) {
+        await patchSmsLog(log.id, {
+          provider_status: status.provider_status,
+          status_checked_at: nowIso(),
+          error: status.provider_status === 'failed' ? (log.error || 'Yetkazilmadi') : (log.error || ''),
+        });
+        if (log.queue_id) {
+          const queueStatus = ['delivered', 'failed'].includes(status.provider_status) ? status.provider_status : 'sent';
+          await updateQueueStatus(log.queue_id, {
+            provider_status: status.provider_status,
+            queue_status: queueStatus,
+            delivered_at: status.data?.data?.delivered_at || '',
+            failed_at: status.data?.data?.failed_at || '',
+            status_checked_at: nowIso(),
+          });
+        }
+      } else {
+        await patchSmsLog(log.id, { status_checked_at: nowIso() });
+      }
+      await sleep(200);
+    }
+  } finally {
+    workerState.statusRunning = false;
+  }
+}
 
-  // Hamma endpoint ishlamadi
-  res.json({ ok: false, error: 'devsms.uz ga ulanib bo'lmadi' });
-});
-
-app.post('/api/sms/reset-count', async (req, res) => {
-  const r = await fbPatch('sms_config', { sms_sent_count: 0 });
-  res.json({ ok: r.ok, message: r.ok ? 'Hisoblagich tiklandi' : 'Xato' });
-});
-
-app.get('/api/sms/stats', async (req, res) => {
-  const cfgRes  = await fbGet('sms_config');
-  const logsRes = await fbGet('sms_logs');
-  const config  = cfgRes.data || {};
-  const logs    = logsRes.data ? Object.values(logsRes.data).filter(Boolean) : [];
-  const today   = nowDate();
-  const byService = {};
-  logs.forEach(l => { const k = l.service_type || l.service_key || l.type || 'other'; byService[k] = (byService[k] || 0) + 1; });
+app.get('/health', async (req, res) => {
+  const auth = verifySessionCookie(parseCookies(req.headers.cookie || '')[COOKIE_NAME]);
+  const queue = await getQueue().catch(() => []);
+  const queuePending = queue.filter((q) => ['pending', 'retry', 'processing'].includes(q.status)).length;
   res.json({
     ok: true,
-    total_sent: config.sms_sent_count || 0,
-    today_count: logs.filter(l => l.date === today).length,
-    success_count: logs.filter(l => l.ok).length,
-    fail_count: logs.filter(l => !l.ok).length,
-    sms_enabled: !!config.enabled,
-    has_token: !!config.devsms_token,
-    by_service: byService,
-    last_5: logs.slice(-5).reverse(),
+    service: 'MoyTrack Backend',
+    version: '8.0',
+    time: nowIso(),
+    timezone: TZ,
+    authenticated: auth,
+    render_hint: 'Free sleep bo‘lsa schedule uyg‘onganda davom etadi',
+    scheduler: {
+      poll_seconds: SCHEDULER_POLL_SECONDS,
+      auto_check_minutes: AUTO_CHECK_MINUTES,
+      queue_pending: queuePending,
+      queue_running: workerState.queueRunning,
+      auto_running: workerState.autoRunning,
+      status_running: workerState.statusRunning,
+    },
   });
 });
 
-app.get('/api/sms/logs', async (req, res) => {
-  const limit = Math.min(parseInt(req.query.limit) || 50, 200);
-  const type  = req.query.type || null;
-  const logsRes = await fbGet('sms_logs');
-  if (!logsRes.ok) return res.status(502).json({ error: 'Firebase xatosi' });
-  let logs = logsRes.data ? Object.values(logsRes.data).filter(Boolean) : [];
-  logs.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
-  if (type) logs = logs.filter(l => l.type === type);
-  res.json({ ok: true, count: logs.slice(0, limit).length, logs: logs.slice(0, limit) });
+app.post('/api/auth/login', (req, res) => {
+  const ip = getRequesterIp(req);
+  const attempts = authAttempts.get(ip) || [];
+  const fresh = attempts.filter((ts) => (Date.now() - ts) < AUTH_WINDOW_MS);
+  if (fresh.length >= AUTH_MAX_ATTEMPTS) {
+    return res.status(429).json({ ok: false, error: 'Juda ko‘p urinish. Birozdan keyin qayta urinib ko‘ring.' });
+  }
+  const pin = String(req.body?.pin || '').trim();
+  if (pin !== APP_PIN) {
+    fresh.push(Date.now());
+    authAttempts.set(ip, fresh);
+    return res.status(401).json({ ok: false, error: 'PIN xato' });
+  }
+  authAttempts.delete(ip);
+  setCookie(res, COOKIE_NAME, makeSessionCookie());
+  res.json({ ok: true });
+});
+app.get('/api/auth/me', (req, res) => {
+  const cookies = parseCookies(req.headers.cookie || '');
+  res.json({ ok: verifySessionCookie(cookies[COOKIE_NAME]) });
+});
+app.post('/api/auth/logout', (req, res) => {
+  clearCookie(res, COOKIE_NAME);
+  res.json({ ok: true });
 });
 
-app.delete('/api/sms/logs', async (req, res) => {
-  const r = await fbPut('sms_logs', null);
-  res.json({ ok: r.ok, message: r.ok ? 'SMS tarix tozalandi' : 'Xato' });
+app.post('/api/sms/callback', async (req, res) => {
+  const payload = req.body || {};
+  const status = String(payload.status || '').trim();
+  const request_id = String(payload.request_id || '');
+  const sms_id = String(payload.sms_id || '');
+  const found = await findProviderIndex({ request_id, sms_id });
+  if (found?.log_id) {
+    await patchSmsLog(found.log_id, {
+      provider_status: status,
+      callback_status: status,
+      callback_payload: payload,
+      ok: status !== 'failed',
+      error: status === 'failed' ? 'SMS yetkazilmadi' : '',
+      status_checked_at: nowIso(),
+    });
+  } else {
+    await saveSmsLog({ type: 'callback', phone: normalizeUzPhone(payload.phone || ''), message: `status=${status || ''}`, ok: status !== 'failed', callback_status: status, request_id, sms_id, callback_payload: payload, provider_status: status });
+  }
+  if (found?.queue_id) {
+    await updateQueueStatus(found.queue_id, {
+      provider_status: status,
+      queue_status: ['delivered', 'failed'].includes(status) ? status : 'sent',
+      callback_at: nowIso(),
+      delivered_at: payload.delivered_at || '',
+      failed_at: payload.failed_at || '',
+      sent_at: payload.sent_at || '',
+    });
+  }
+  res.json({ ok: true });
 });
 
+app.use('/api', requireAuth, (req, res, next) => { scheduleWorkerKick(); next(); });
+
+app.get('/api/bootstrap', async (req, res) => {
+  const [carsRes, oilsRes, smsRes, cfgRes, logsRes, queue] = await Promise.all([getCars(), getOils(), getSmsConfig(), getCfg(), fbGet('sms_logs'), getQueue()]);
+  const logs = objectValuesSorted(logsRes.data).sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0)).slice(0, 80);
+  const schedules = queue.filter((q) => ['pending', 'retry', 'processing', 'sent', 'failed', 'delivered', 'missed'].includes(q.status)).slice(0, 80);
+  res.json({ ok: true, cars: carsRes.cars, oils: oilsRes.oils, sms_config: publicSmsConfig(smsRes.config), cfg: cfgRes.cfg, logs, schedules });
+});
+app.get('/api/storage/ping', async (req, res) => {
+  const started = Date.now();
+  const result = await fbGet('_ping');
+  res.json({ ok: result.ok, ping_ms: Date.now() - started, storage_status: result.status || 0, storage_type: 'Firebase Realtime Database' });
+});
 app.get('/api/firebase/ping', async (req, res) => {
-  const start = Date.now();
-  const r = await fbGet('_ping');
-  res.json({ ok: r.ok, firebase_url: FIREBASE_URL, ping_ms: Date.now() - start });
+  const started = Date.now();
+  const result = await fbGet('_ping');
+  res.json({ ok: result.ok, ping_ms: Date.now() - started, firebase_status: result.status || 0, storage_type: 'Firebase Realtime Database' });
+});
+app.get('/api/system/info', async (req, res) => {
+  res.json({ ok: true, storage: { type: 'Firebase Realtime Database', mode: 'backend-only', direct_client_access: false }, sms_provider: 'DevSMS', auth_mode: 'PIN session' });
+});
+app.post('/api/cars', async (req, res) => {
+  const car = sanitizeCar(req.body || {});
+  if (!car.car_name || !car.car_number) return res.status(400).json({ ok: false, error: 'Mashina nomi va raqami kerak' });
+  await fbPut(`cars/car_${car.id}`, car);
+  res.json({ ok: true, car });
+});
+app.delete('/api/cars/:id', async (req, res) => {
+  await fbDelete(`cars/car_${req.params.id}`);
+  res.json({ ok: true });
+});
+app.post('/api/oils', async (req, res) => {
+  const oil = sanitizeOil(req.body || {});
+  if (!oil.name) return res.status(400).json({ ok: false, error: 'Moy nomi kerak' });
+  await fbPut(`oils/oil_${oil.id}`, oil);
+  res.json({ ok: true, oil });
+});
+app.delete('/api/oils/:id', async (req, res) => {
+  await fbDelete(`oils/oil_${req.params.id}`);
+  res.json({ ok: true });
+});
+app.post('/api/cfg', async (req, res) => {
+  const next = { ...DEFAULT_CFG, ...(req.body || {}), updated_at: nowIso() };
+  await fbPut('cfg', next);
+  res.json({ ok: true, cfg: next });
+});
+app.get('/api/sms-config', async (req, res) => {
+  const { config } = await getSmsConfig();
+  res.json({ ok: true, config: publicSmsConfig(config) });
+});
+app.post('/api/sms-config', async (req, res) => {
+  const current = (await getSmsConfig()).config;
+  const body = req.body || {};
+  const next = {
+    ...current,
+    enabled: !!body.enabled,
+    test_phone: normalizeUzPhone(body.test_phone || current.test_phone || ''),
+    service_done_message: String(body.service_done_message || current.service_done_message || DEFAULT_SMS.service_done_message),
+    service_due_message: String(body.service_due_message || current.service_due_message || DEFAULT_SMS.service_due_message),
+    updated_at: nowIso(),
+  };
+  const freshToken = String(body.devsms_token || '').trim();
+  next.devsms_token = freshToken || current.devsms_token || DEVSMS_TOKEN;
+  await fbPut('sms_config', next);
+  res.json({ ok: true, config: publicSmsConfig(next) });
+});
+app.post('/api/sms/verify-token', async (req, res) => {
+  const token = String(req.body?.token || '').trim();
+  if (!token) return res.status(400).json({ ok: false, error: 'Token kerak' });
+  const checked = await verifyDevSmsToken(token);
+  res.status(checked.ok ? 200 : 400).json({ ok: checked.ok, balance: checked.balance, http_status: checked.status || 0, data: checked.data, error: checked.error || '' });
+});
+app.post('/api/sms/send', async (req, res) => {
+  const phone = normalizeUzPhone(req.body?.phone || '');
+  const message = String(req.body?.message || '').trim();
+  if (!phone || !message) return res.status(400).json({ ok: false, error: 'Telefon va xabar kerak' });
+  const scheduleAt = req.body?.schedule_at ? new Date(req.body.schedule_at) : null;
+  if (scheduleAt && !Number.isNaN(scheduleAt.getTime()) && scheduleAt.getTime() > Date.now() + 10000) {
+    const item = sanitizeQueueItem({
+      id: stableId('q'),
+      phone,
+      message,
+      schedule_label: req.body?.schedule_label || '',
+      car_name: req.body?.car_name || '',
+      scheduled_for: scheduleAt.toISOString(),
+      next_attempt_at: scheduleAt.toISOString(),
+      status: 'pending',
+      created_at: nowIso(),
+      queue_status: 'pending',
+    });
+    await upsertQueue(item);
+    scheduleWorkerKick();
+    return res.json({ ok: true, scheduled: true, item });
+  }
+  const sent = await sendMessageWithConfig({ phone, message, type: 'direct', meta: { queue_status: '' } });
+  res.json({ ok: sent.ok, scheduled: false, error: sent.error || '', devsms: sent.data || {}, request_id: sent.request_id || '', sms_id: sent.sms_id || '' });
+});
+app.get('/api/sms/schedules', async (req, res) => {
+  const items = await getQueue();
+  res.json({ ok: true, schedules: items.slice(0, Number(req.query.limit || 150)) });
+});
+app.delete('/api/sms/schedules/:id', async (req, res) => {
+  const current = await fbGet(`sms_queue/${req.params.id}`);
+  if (!current.data) return res.json({ ok: true });
+  await fbPut(`sms_queue/${req.params.id}`, { ...current.data, status: 'cancelled', queue_status: 'cancelled', cancelled_at: nowIso() });
+  res.json({ ok: true });
+});
+app.post('/api/sms/test', async (req, res) => {
+  const { config } = await getSmsConfig();
+  const phone = normalizeUzPhone(req.body?.phone || config.test_phone || '');
+  if (!phone) return res.status(400).json({ ok: false, error: 'Test raqam topilmadi' });
+  const text = String(req.body?.message || 'Test SMS').trim();
+  const sent = await sendMessageWithConfig({ phone, message: text, type: 'test' });
+  res.json({ ok: sent.ok, text, error: sent.error, devsms: sent.data, request_id: sent.request_id || '', sms_id: sent.sms_id || '' });
+});
+app.post('/api/sms/service-change', async (req, res) => {
+  const car = sanitizeCar(req.body?.car || {});
+  const type = String(req.body?.service_type || '').trim();
+  const { config } = await getSmsConfig();
+  if (!car.phone_number || !type) return res.status(400).json({ ok: false, error: 'Telefon va xizmat turi kerak' });
+  const serviceName = SVC_META[type]?.label || type;
+  const text = fillTemplate(config.service_done_message || DEFAULT_SMS.service_done_message, car, serviceName);
+  const sent = await sendMessageWithConfig({ phone: car.phone_number, message: text, type: 'service_change', meta: { service_type: type, car_name: car.car_name } });
+  res.json({ ok: sent.ok, text, error: sent.error, devsms: sent.data });
+});
+app.post('/api/sms/car-saved', async (req, res) => {
+  const car = sanitizeCar(req.body?.car || {});
+  const checked = Array.isArray(req.body?.checked_keys) ? req.body.checked_keys : [];
+  const { config } = await getSmsConfig();
+  if (!car.phone_number) return res.status(400).json({ ok: false, error: 'Telefon topilmadi' });
+  const services = checked.map((k) => (SVC_META[k] ? SVC_META[k].label : k)).join(', ');
+  const serviceName = services ? `Xizmatlar qayd etildi: ${services}` : "Avtomobil ma'lumoti tizimga saqlandi";
+  const text = fillTemplate(config.service_done_message || DEFAULT_SMS.service_done_message, car, serviceName);
+  const sent = await sendMessageWithConfig({ phone: car.phone_number, message: text, type: 'car_saved', meta: { car_name: car.car_name } });
+  res.json({ ok: sent.ok, text, error: sent.error, devsms: sent.data });
+});
+app.post('/api/sms/reset-count', async (req, res) => {
+  const current = (await getSmsConfig()).config;
+  await fbPut('sms_config', { ...current, sms_sent_count: 0, updated_at: nowIso() });
+  res.json({ ok: true });
+});
+app.get('/api/sms/logs', async (req, res) => {
+  const logsRes = await fbGet('sms_logs');
+  const logs = objectValuesSorted(logsRes.data).sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0)).slice(0, Number(req.query.limit || 150));
+  res.json({ ok: true, logs });
+});
+app.delete('/api/sms/logs', async (req, res) => {
+  await fbPut('sms_logs', null);
+  await fbPut('sms_provider_index', null);
+  res.json({ ok: true });
+});
+app.get('/api/sms/stats', async (req, res) => {
+  const { config } = await getSmsConfig();
+  const logs = objectValuesSorted((await fbGet('sms_logs')).data);
+  const today = nowDate();
+  const queue = await getQueue();
+  res.json({
+    ok: true,
+    total_sent: parseMaybeNumber(config.sms_sent_count, 0),
+    today_count: logs.filter((l) => l.date === today).length,
+    fail_count: logs.filter((l) => l.ok === false || l.provider_status === 'failed').length,
+    success_count: logs.filter((l) => l.ok === true).length,
+    delivered_count: logs.filter((l) => l.provider_status === 'delivered').length,
+    pending_queue: queue.filter((q) => ['pending', 'retry', 'processing'].includes(q.status)).length,
+    has_token: !!config.devsms_token,
+    sms_enabled: !!config.enabled,
+  });
+});
+app.post('/api/sms/refresh-statuses', async (req, res) => {
+  await syncRecentStatuses();
+  const logsRes = await fbGet('sms_logs');
+  const logs = objectValuesSorted(logsRes.data).sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0)).slice(0, 80);
+  res.json({ ok: true, logs });
+});
+app.post('/api/sms/run-auto-check', async (req, res) => {
+  await processAutoReminders();
+  res.json({ ok: true });
+});
+app.post('/api/sms/run-queue', async (req, res) => {
+  await processScheduledQueue();
+  await syncRecentStatuses();
+  res.json({ ok: true });
 });
 
 app.use(express.static(path.join(__dirname)));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
-
-app.use((req, res) => {
-  res.status(404).json({ error: 'Endpoint topilmadi', path: req.path, tip: 'GET /api - royhatni korish uchun' });
-});
 app.use((err, req, res, next) => {
-  console.error('Server xatosi:', err);
-  res.status(500).json({ error: 'Server ichki xatosi', message: err.message });
+  console.error('Server error:', err);
+  res.status(500).json({ ok: false, error: 'Server xatosi', detail: err.message });
 });
+
+setInterval(() => { processScheduledQueue().catch(console.error); }, SCHEDULER_POLL_SECONDS * 1000);
+setInterval(() => { processAutoReminders().catch(console.error); }, AUTO_CHECK_MINUTES * 60 * 1000);
+setInterval(() => { syncRecentStatuses().catch(console.error); }, STATUS_SYNC_SECONDS * 1000);
 
 app.listen(PORT, () => {
-  console.log('\n🚀 MoyTrack Backend v4.5 ishga tushdi!');
-  console.log(`   Port    : http://localhost:${PORT}`);
-  console.log(`   Firebase: ${FIREBASE_URL}`);
-  console.log('\n📌 Endpointlar:');
-  console.log(`   GET  /health, /api`);
-  console.log(`   GET/POST /api/sms-config`);
-  console.log(`   POST /api/sms/test|send|bulk|service-change|car-saved|auto-check|verify-token|reset-count`);
-  console.log(`   GET  /api/sms/stats|logs`);
-  console.log(`   DELETE /api/sms/logs\n`);
+  console.log(`MoyTrack backend running on http://localhost:${PORT}`);
+  processScheduledQueue().catch(console.error);
+  processAutoReminders().catch(console.error);
+  syncRecentStatuses().catch(console.error);
 });

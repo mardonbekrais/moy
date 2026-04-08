@@ -595,3 +595,19 @@ body{font-family:'DM Sans',-apple-system,sans-serif;background:var(--bg);color:v
 
 /* ===== TOKEN EYE BUTTON ===== */
 #devsms-token{padding-right:46px!important}
+
+/* AUTH PIN */
+.app-locked .app{filter:blur(8px);pointer-events:none;user-select:none}
+.pin-overlay{position:fixed;inset:0;background:rgba(8,10,16,.82);backdrop-filter:blur(10px);display:none;align-items:center;justify-content:center;z-index:3000;padding:20px}
+.pin-overlay.active{display:flex}
+.pin-card{width:min(420px,100%);background:var(--card);border:1px solid var(--border);border-radius:24px;padding:24px;box-shadow:0 18px 60px rgba(0,0,0,.35);text-align:center}
+.pin-icon{font-size:34px;margin-bottom:10px}.pin-card h2{font-size:24px;margin-bottom:8px}.pin-card p{font-size:13px;color:var(--text2);line-height:1.6;margin-bottom:14px}
+.pin-input{width:100%;padding:14px 16px;border-radius:14px;border:1px solid var(--border2);background:var(--bg3);color:var(--text);font-size:16px;outline:none;margin-bottom:10px}
+.pin-btn{width:100%;padding:14px 16px;border:none;border-radius:14px;background:linear-gradient(135deg,var(--primary),var(--pl));color:#fff;font-weight:700;cursor:pointer}
+.pin-status{margin-top:10px;font-size:13px;color:var(--text2);min-height:18px}.pin-status.error{color:var(--danger)}.pin-status.success{color:var(--success)}
+
+/* SCHEDULE */
+.sched-list{margin-top:12px;display:flex;flex-direction:column;gap:8px}
+.sched-item{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs)}
+.sched-title{font-size:13px;font-weight:700}.sched-sub{font-size:11px;color:var(--text2);margin-top:3px}
+.sched-del{border:none;background:var(--dbg);color:var(--danger);border-radius:10px;padding:8px 10px;font-size:12px;font-weight:700;cursor:pointer}
